@@ -3,6 +3,13 @@
   "version": "1.0.0",
   "description": "استعلام طلا",
   "main": "server.js",
+  "orchestrator": {
+    "name": "raygnd",
+    "type": "backend",
+    "entry": "server.js",
+    "port": 9060,
+    "autoStart": true
+  },
   "scripts": {
     "build": "echo 'No build required'",
     "lint": "echo 'No lint issues'",
