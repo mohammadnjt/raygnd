@@ -1,113 +1,102 @@
 const mongoose = require("mongoose");
+const jwt = require("jsonwebtoken");
+
+// Models
 const Report = require("../models/report.model");
+const User = require("../models/user.model");
+const InquiryHistory = require("../models/inquiryHistory.model");
+const Bookmark = require("../models/bookmark.model");
+const Order = require("../models/order.model");
+const RentalRequest = require("../models/rentalRequest.model");
+const ProjectRequest = require("../models/projectRequest.model");
+const Notification = require("../models/notification.model");
+const Lab = require("../models/lab.model");
+
+// Scripts & Services
 const redis = require("../scripts/redis");
 const fetchFromMSanjesh = require("../scripts/msanjesh");
 
-// Mock / Default Data fallback derived from dev.js specification
-const DEFAULT_USERS = [
-  {
-    id: 1,
-    mobile: "09123456789",
-    fname: "محمد",
-    lname: "رضایی",
-    email: "mohammad.rezaei@example.com",
-    avatar: "",
-    nationalCode: "1234567890",
-    role: "customer",
-    city: "مشهد",
-    address: "مشهد، خیابان امام رضا، پلاک ۱۲",
-    phone: "09123456789",
-    name: "محمد رضایی",
-    createdAt: "1404/01/01",
-    isActive: true,
+// Helper to extract caller user / finger
+async function resolveCaller(req) {
+  const params = { ...req.query, ...req.body };
+  const finger =
+    req.headers["x-user-finger"] ||
+    params.finger ||
+    req.headers["finger"] ||
+    "guest_finger";
+
+  let user = req.user || null;
+
+  if (!user && req.headers.authorization) {
+    try {
+      const token = req.headers.authorization.replace("Bearer ", "");
+      const decoded = jwt.verify(
+        token,
+        process.env.JWT_SECRET || "your-secret-key"
+      );
+      if (decoded && decoded.userId && mongoose.connection.readyState === 1) {
+        user = await User.findById(decoded.userId);
+      }
+    } catch (e) {}
   }
-];
 
-const DEFAULT_LABS = [
-  { id: 1, name: "آزمایشگاه پوربرات", city: "مشهد", phone: "۰۵۸۳۲۲۲۹۹۳۲", address: "مشهد، خیابان طبرسی", score: 87, isActive: true },
-  { id: 2, name: "آزمایشگاه صحرانورد", city: "مشهد", phone: "۰۵۸۳۲۲۲۶۷۲۳", address: "مشهد، خیابان امام خمینی", score: 76, isActive: true },
-  { id: 3, name: "آزمایشگاه یزدانی", city: "تهران", phone: "۰۲۱۳۳۴۴۵۵۶۶", address: "تهران، خیابان ولیعصر", score: 72, isActive: true },
-  { id: 4, name: "آزمایشگاه رضوی", city: "اصفهان", phone: "۰۳۱۳۲۲۲۱۱۲۲", address: "اصفهان، چهارباغ", score: 68, isActive: true },
-  { id: 5, name: "آزمایشگاه نور", city: "شیراز", phone: "۰۷۱۳۲۲۲۳۳۴۴", address: "شیراز، خیابان زند", score: 65, isActive: true }
-];
-
-const DEFAULT_TOP_LABS = [
-  { rank: "۱", name: "آزمایشگاه پوربرات", score: "۸۷", phone: "۰۵۸۳۲۲۲۹۹۳۲", city: "مشهد" },
-  { rank: "۲", name: "آزمایشگاه صحرانورد", score: "۷۶", phone: "۰۵۸۳۲۲۲۶۷۲۳", city: "مشهد" },
-  { rank: "۳", name: "آزمایشگاه یزدانی", score: "۷۲", phone: "۰۲۱۳۳۴۴۵۵۶۶", city: "تهران" },
-  { rank: "۴", name: "آزمایشگاه رضوی", score: "۶۸", phone: "۰۳۱۳۲۲۲۱۱۲۲", city: "اصفهان" },
-  { rank: "۵", name: "آزمایشگاه نور", score: "۶۵", phone: "۰۷۱۳۲۲۲۳۳۴۴", city: "شیراز" }
-];
-
-const DEFAULT_BANNERS = [
-  { id: "1", title: "استعلام اصالت طلا", desc: "با وارد کردن کد انگ، اصالت طلا را بررسی کنید", color: "#DFEDFD" },
-  { id: "2", title: "آزمایشگاه‌های معتبر", desc: "لیست آزمایشگاه‌های ری‌گیری معتبر کشور", color: "#FFF3DD" },
-  { id: "3", title: "پیگیری نتایج", desc: "نتایج استعلام‌های قبلی خود را مشاهده کنید", color: "#E2F7EB" }
-];
-
-const DEFAULT_ORDERS = [
-  {
-    id: "ORD-1001",
-    sellerId: "s1",
-    sellerName: "گالری طلا و جواهر احسان",
-    sellerPhone: "09123456787",
-    labId: "l1",
-    labName: "آزمایشگاه پوربرات",
-    meltMethod: "traditional",
-    source: "online",
-    estimatedWeight: 150,
-    bookingDateLabel: "امروز - ۱۰:۰۰",
-    status: "pending",
-    hasJewel: true,
-    wage: null,
-    labFeeAmount: 150000,
-    labFeeType: "toman",
-    sampleDelivered: true,
-    createdAt: "1404/03/10"
-  },
-  {
-    id: "ORD-0998",
-    sellerId: "s1",
-    sellerName: "گالری طلا و جواهر احسان",
-    sellerPhone: "09123456787",
-    labId: "l1",
-    labName: "آزمایشگاه پوربرات",
-    meltMethod: "traditional",
-    source: "online",
-    estimatedWeight: 90,
-    bookingDateLabel: "دیروز - ۱۶:۰۰",
-    status: "received",
-    wage: { type: "gram", value: 2 },
-    proformaNumber: "PF-2025",
-    receivedWeight: 92,
-    createdAt: "1404/03/08"
+  // Fallback find user by finger if logged in previously
+  if (!user && finger && mongoose.connection.readyState === 1) {
+    try {
+      user = await User.findOne({ finger });
+    } catch (e) {}
   }
-];
 
-// Unified Operation Dispatcher
+  return { finger, user };
+}
+
+// Unified Operation Handler
 exports.handleOperation = async (req, res) => {
   try {
     const params = { ...req.query, ...req.body };
     const op = params.op || req.params.op;
 
     if (!op) {
-      return res.status(400).json({ success: false, message: "Operation parameter (op) is required" });
+      return res
+        .status(400)
+        .json({ success: false, message: "پارامتر op ارسال نشده است" });
     }
 
+    const { finger, user } = await resolveCaller(req);
+    const isDbConnected = mongoose.connection.readyState === 1;
+
     switch (op) {
-      // 1. Version
+      // ═══════════════════════════════════════════════════════════
+      // 1. Version & System
+      // ═══════════════════════════════════════════════════════════
       case "m_version":
         return res.json({
           success: true,
           version: "1.0.0",
           logo: "https://raygnd.blhgroups.ir/assets/logo.png",
-          name: "ری‌گیر"
+          name: "ری‌گیر",
         });
 
-      // 2. Login
+      // ═══════════════════════════════════════════════════════════
+      // 2. Authentication (login, verify, profile)
+      // ═══════════════════════════════════════════════════════════
       case "m_login": {
-        const mobile = params.username || params.mob || params.mobile || "09123456789";
-        // Save OTP in Redis
+        const mobile =
+          params.username || params.mob || params.mobile || "09123456789";
+
+        let dbUser = null;
+        if (isDbConnected) {
+          dbUser = await User.findOne({ mobile });
+          if (!dbUser) {
+            dbUser = await User.create({
+              mobile,
+              finger,
+              name: "کاربر جدید",
+              role: "customer",
+            });
+          }
+        }
+
         try {
           await redis.set(`otp:${mobile}`, "12345", "EX", 300);
         } catch (e) {}
@@ -116,303 +105,713 @@ exports.handleOperation = async (req, res) => {
           success: true,
           message: "کد تایید برای شما ارسال شد",
           code: 12345,
-          user: DEFAULT_USERS[0]
+          user: dbUser || {
+            id: 1,
+            mobile,
+            fname: "کاربر",
+            lname: "تست",
+            role: "customer",
+          },
         });
       }
 
-      // 3. Verify OTP
       case "m_verify": {
-        const finger = params.finger || `finger_${Date.now()}`;
-        return res.json({
-          finger,
-          success: true,
-          message: "ورود موفقیت‌آمیز",
-          user: DEFAULT_USERS[0]
-        });
-      }
-
-      // 4. Profile
-      case "m_profile": {
-        if (params.fname || params.lname || params.name || params.email) {
-          const updatedUser = {
-            ...DEFAULT_USERS[0],
-            fname: params.fname || DEFAULT_USERS[0].fname,
-            lname: params.lname || DEFAULT_USERS[0].lname,
-            email: params.email || DEFAULT_USERS[0].email,
-            address: params.address || DEFAULT_USERS[0].address
-          };
+        const code = params.code;
+        if (code && code !== "12345" && code !== 12345) {
           return res.json({
-            success: true,
-            message: "پروفایل با موفقیت بروزرسانی شد",
-            data: updatedUser
+            success: false,
+            message: "کد وارد شده نامعتبر است.",
           });
         }
+
+        const activeFinger = params.finger || finger || `finger_${Date.now()}`;
+        let token = "";
+
+        if (user) {
+          token = jwt.sign(
+            { userId: user._id, role: user.role },
+            process.env.JWT_SECRET || "your-secret-key",
+            { expiresIn: "30d" }
+          );
+        }
+
         return res.json({
+          finger: activeFinger,
+          token,
           success: true,
-          data: DEFAULT_USERS[0]
+          message: "ورود موفقیت‌آمیز",
+          user: user || {
+            id: 1,
+            mobile: "09123456789",
+            fname: "محمد",
+            lname: "رضایی",
+            role: "customer",
+          },
         });
       }
 
-      // 5. Inquiry (Golden inquiry logic + msanjesh integration)
+      case "m_profile": {
+        if (params.fname || params.lname || params.name || params.email) {
+          if (isDbConnected && user) {
+            user.fname = params.fname || user.fname;
+            user.lname = params.lname || user.lname;
+            user.name = params.name || `${user.fname} ${user.lname}`.trim();
+            user.email = params.email || user.email;
+            user.address = params.address || user.address;
+            user.city = params.city || user.city;
+            await user.save();
+
+            return res.json({
+              success: true,
+              message: "پروفایل با موفقیت بروزرسانی شد",
+              data: user,
+            });
+          }
+        }
+
+        if (isDbConnected && user) {
+          return res.json({ success: true, data: user });
+        }
+
+        return res.json({
+          success: true,
+          data: {
+            id: 1,
+            name: "محمد رضایی",
+            fname: "محمد",
+            lname: "رضایی",
+            email: "mohammad.rezaei@example.com",
+            phone: "09123456789",
+            mobile: "09123456789",
+            address: "مشهد، خیابان امام رضا، پلاک ۱۲",
+            nationalCode: "1234567890",
+            role: "customer",
+            city: "مشهد",
+            avatar: "",
+          },
+        });
+      }
+
+      // ═══════════════════════════════════════════════════════════
+      // 3. Gold Inquiry (m_inquiry) + Msanjesh fallback & Logging
+      // ═══════════════════════════════════════════════════════════
       case "m_inquiry": {
         const code = params.angCode || params.code;
         if (!code) {
-          return res.status(400).json({ success: false, message: "کد انگ (angCode) الزامی است" });
+          return res
+            .status(400)
+            .json({ success: false, message: "کد انگ (angCode) الزامی است" });
         }
 
         const cacheKey = `report:${code}`;
+        let responseData = null;
 
         // a) Check Redis
         try {
           const cached = await redis.get(cacheKey);
           if (cached) {
-            console.log("[m_inquiry] Redis hit for code:", code);
+            console.log("[m_inquiry] Redis HIT for code:", code);
             const parsed = JSON.parse(cached);
-            return res.json({
-              success: true,
-              message: "استعلام با موفقیت انجام شد",
-              data: parsed.data || parsed
-            });
+            responseData = parsed.data || parsed;
           }
         } catch (e) {}
 
-        // b) Check MongoDB
-        let dbRecord = null;
-        if (mongoose.connection.readyState === 1) {
+        // b) Check MongoDB if not found in Redis
+        if (!responseData && isDbConnected) {
           try {
-            dbRecord = await Report.findOne({ code });
-          } catch (e) {}
+            const dbRecord = await Report.findOne({ code });
+            if (dbRecord) {
+              console.log("[m_inquiry] Mongo HIT for code:", code);
+              // Update search metadata
+              dbRecord.searchCount = (dbRecord.searchCount || 0) + 1;
+              dbRecord.lastSearchedBy = finger;
+              await dbRecord.save();
+
+              responseData =
+                dbRecord.htmlData && dbRecord.htmlData.length > 0
+                  ? dbRecord.htmlData.map((row, idx) => ({
+                      id: String(idx + 1),
+                      angCode: code,
+                      labName: row.center || "آزمایشگاه ری‌گیری",
+                      customer: row.customer || "مشتری",
+                      resultValue: row.result || "۷۵۰",
+                      status: "تایید",
+                      date: new Date(dbRecord.createdAt).toLocaleDateString(
+                        "fa-IR"
+                      ),
+                      time: new Date(dbRecord.createdAt).toLocaleTimeString(
+                        "fa-IR",
+                        { hour: "2-digit", minute: "2-digit" }
+                      ),
+                      details: {
+                        receipt: row.receipt,
+                        docText: dbRecord.docText,
+                      },
+                    }))
+                  : [
+                      {
+                        id: "1",
+                        angCode: code,
+                        labName: "آزمایشگاه پوربرات",
+                        customer: "گالری طلا",
+                        resultValue: "۷۵۰.۵",
+                        status: "تایید",
+                        date: new Date(dbRecord.createdAt).toLocaleDateString(
+                          "fa-IR"
+                        ),
+                        time: "۱۰:۳۰",
+                        details: { docText: dbRecord.docText },
+                      },
+                    ];
+
+              // Save formatted response to Redis cache
+              try {
+                await redis.set(
+                  cacheKey,
+                  JSON.stringify({ data: responseData }),
+                  "EX",
+                  86400
+                );
+              } catch (e) {}
+            }
+          } catch (err) {
+            console.warn("MongoDB Report lookup error:", err.message);
+          }
         }
 
-        if (dbRecord) {
-          console.log("[m_inquiry] Mongo hit for code:", code);
-          const formatted = dbRecord.htmlData && dbRecord.htmlData.length > 0
-            ? dbRecord.htmlData.map((row, idx) => ({
-                id: String(idx + 1),
+        // c) Fetch from msanjesh.js if not found in DB
+        if (!responseData) {
+          console.log("[m_inquiry] Fetching from msanjesh for code:", code);
+          const msanjeshResult = await fetchFromMSanjesh(code);
+
+          if (
+            msanjeshResult.success &&
+            msanjeshResult.htmlData &&
+            msanjeshResult.htmlData.length > 0
+          ) {
+            // Save to MongoDB
+            if (isDbConnected) {
+              try {
+                await Report.create({
+                  code,
+                  htmlData: msanjeshResult.htmlData,
+                  docText: msanjeshResult.docText,
+                  lastSearchedBy: finger,
+                  searchCount: 1,
+                });
+                console.log("[m_inquiry] Successfully saved report to MongoDB:", code);
+              } catch (e) {
+                console.warn("Report save to MongoDB failed:", e.message);
+              }
+            }
+
+            responseData = msanjeshResult.htmlData.map((row, idx) => ({
+              id: String(idx + 1),
+              angCode: code,
+              labName: row.center || "آزمایشگاه ری‌گیری",
+              customer: row.customer || "مشتری",
+              resultValue: row.result || "۷۵۰",
+              status: "تایید",
+              date: new Date().toLocaleDateString("fa-IR"),
+              time: new Date().toLocaleTimeString("fa-IR", {
+                hour: "2-digit",
+                minute: "2-digit",
+              }),
+              details: {
+                receipt: row.receipt,
+                docText: msanjeshResult.docText,
+              },
+            }));
+
+            try {
+              await redis.set(
+                cacheKey,
+                JSON.stringify({ data: responseData }),
+                "EX",
+                86400
+              );
+            } catch (e) {}
+          } else {
+            // Fallback mock if msanjesh has no record
+            responseData = [
+              {
+                id: "1",
                 angCode: code,
-                labName: row.center || "آزمایشگاه پوربرات",
-                customer: row.customer || "گالری طلا و جواهر احسان",
-                resultValue: row.result || "۷۵۰.۵",
+                labName: "آزمایشگاه پوربرات",
+                customer: "گالری طلا و جواهر احسان",
+                resultValue: "۷۵۰.۵",
                 status: "تایید",
-                date: new Date(dbRecord.createdAt).toLocaleDateString("fa-IR"),
+                date: "۱۴۰۵/۰۲/۱۵",
                 time: "۱۰:۳۰",
                 details: {
-                  receipt: row.receipt,
-                  docText: dbRecord.docText
-                }
-              }))
-            : [
-                {
-                  id: "1",
-                  angCode: code,
-                  labName: "آزمایشگاه ری‌گیری پوربرات",
-                  customer: "گالری طلا و جواهر",
-                  resultValue: "۷۵۰.۵",
-                  status: "تایید",
-                  date: new Date(dbRecord.createdAt).toLocaleDateString("fa-IR"),
-                  time: "۱۰:۳۰",
-                  details: { docText: dbRecord.docText }
-                }
-              ];
-
-          try {
-            await redis.set(cacheKey, JSON.stringify({ data: formatted }), "EX", 86400);
-          } catch (e) {}
-
-          return res.json({
-            success: true,
-            message: "استعلام با موفقیت انجام شد",
-            data: formatted
-          });
+                  weight: "۱۵۰ گرم",
+                  purity: "۷۵۰.۵",
+                  method: "ری‌گیری",
+                  certificateNo: `CERT-${code}`,
+                },
+              },
+            ];
+          }
         }
 
-        // c) Not in DB -> fetch from msanjesh.js!
-        console.log("[m_inquiry] Fetching from msanjesh for code:", code);
-        const msanjeshResult = await fetchFromMSanjesh(code);
-
-        if (msanjeshResult.success && msanjeshResult.htmlData && msanjeshResult.htmlData.length > 0) {
-          // Save to MongoDB
-          let savedRecord = null;
-          if (mongoose.connection.readyState === 1) {
-            try {
-              savedRecord = await Report.create({
-                code,
-                htmlData: msanjeshResult.htmlData,
-                docText: msanjeshResult.docText
-              });
-            } catch (e) {}
-          }
-
-          const formatted = msanjeshResult.htmlData.map((row, idx) => ({
-            id: String(idx + 1),
-            angCode: code,
-            labName: row.center || "آزمایشگاه ری‌گیری msanjesh",
-            customer: row.customer || "مشتری",
-            resultValue: row.result || "۷۵۰.۰",
-            status: "تایید",
-            date: new Date().toLocaleDateString("fa-IR"),
-            time: "۱۰:۳۰",
-            details: {
-              receipt: row.receipt,
-              docText: msanjeshResult.docText
-            }
-          }));
-
+        // d) Save search log to InquiryHistory per user/finger!
+        if (isDbConnected && responseData && responseData.length > 0) {
           try {
-            await redis.set(cacheKey, JSON.stringify({ data: formatted }), "EX", 86400);
-          } catch (e) {}
-
-          return res.json({
-            success: true,
-            message: "استعلام با موفقیت انجام شد (از مرجع سنجش)",
-            data: formatted
-          });
-        }
-
-        // Fallback response for testing if msanjesh has no match
-        const sampleFallback = [
-          {
-            id: "1",
-            angCode: code,
-            labName: "آزمایشگاه ری‌گیری پوربرات",
-            customer: "گالری طلا و جواهر احسان",
-            resultValue: "۷۵۰.۵",
-            status: "تایید",
-            date: "۱۴۰۵/۰۲/۱۵",
-            time: "۱۰:۳۰",
-            details: {
-              weight: "۱۵۰ گرم",
-              purity: "۷۵۰.۵",
-              method: "ری‌گیری سنتی",
-              labTechnician: "مهندس محمدی",
-              certificateNo: `CERT-${code}`
-            }
+            const topItem = responseData[0];
+            await InquiryHistory.create({
+              userId: user?._id || null,
+              finger,
+              angCode: code,
+              labName: topItem.labName || "آزمایشگاه",
+              resultValue: topItem.resultValue || "۷۵۰",
+              status: topItem.status || "تایید",
+              date: new Date().toLocaleDateString("fa-IR"),
+              time: new Date().toLocaleTimeString("fa-IR", {
+                hour: "2-digit",
+                minute: "2-digit",
+              }),
+            });
+            console.log("[m_inquiry] Recorded inquiry history for finger/user:", finger);
+          } catch (e) {
+            console.warn("Failed to record inquiry history:", e.message);
           }
-        ];
+        }
 
         return res.json({
           success: true,
-          message: "استعلام انجام شد",
-          data: sampleFallback
+          message: "استعلام با موفقیت انجام شد",
+          data: responseData,
         });
       }
 
-      // 6. Inquiry History
-      case "m_inquiry_history":
+      // ═══════════════════════════════════════════════════════════
+      // 4. Inquiry History (m_inquiry_history)
+      // ═══════════════════════════════════════════════════════════
+      case "m_inquiry_history": {
+        if (isDbConnected) {
+          try {
+            const query = [];
+            if (user?._id) query.push({ userId: user._id });
+            if (finger) query.push({ finger });
+
+            if (query.length > 0) {
+              const history = await InquiryHistory.find({ $or: query })
+                .sort({ createdAt: -1 })
+                .limit(50);
+
+              if (history && history.length > 0) {
+                return res.json({
+                  success: true,
+                  data: history.map((h, i) => ({
+                    id: h._id.toString(),
+                    angCode: h.angCode,
+                    labName: h.labName,
+                    resultValue: h.resultValue,
+                    status: h.status,
+                    date: h.date,
+                    time: h.time,
+                  })),
+                });
+              }
+            }
+          } catch (e) {}
+        }
+
         return res.json({
           success: true,
           data: [
-            { id: "inq-001", angCode: "Aa55576", labName: "آزمایشگاه پوربرات", resultValue: "۷۵۰.۵", status: "تایید", date: "۱۴۰۵/۰۲/۱۵", time: "۱۰:۳۰" },
-            { id: "inq-002", angCode: "Bb12345", labName: "آزمایشگاه صحرانورد", resultValue: "۷۴۸.۲", status: "تایید", date: "۱۴۰۵/۰۲/۱۰", time: "۱۱:۰۰" }
-          ]
+            {
+              id: "inq-001",
+              angCode: "Aa55576",
+              labName: "آزمایشگاه پوربرات",
+              resultValue: "۷۵۰.۵",
+              status: "تایید",
+              date: "۱۴۰۵/۰۲/۱۵",
+              time: "۱۰:۳۰",
+            },
+            {
+              id: "inq-002",
+              angCode: "26007",
+              labName: "خاوران بیرجند",
+              resultValue: "۷۴۶",
+              status: "تایید",
+              date: "۱۴۰۵/۰۲/۱۶",
+              time: "۱۱:۰۰",
+            },
+          ],
         });
+      }
 
-      // 7. Bookmark Inquiry
-      case "m_bookmark_inquiry":
+      // ═══════════════════════════════════════════════════════════
+      // 5. Bookmarks (m_bookmark_inquiry, m_bookmarks)
+      // ═══════════════════════════════════════════════════════════
+      case "m_bookmark_inquiry": {
+        const inquiryId = params.inquiryId || params.angCode;
+        if (isDbConnected) {
+          try {
+            await Bookmark.create({
+              userId: user?._id || null,
+              finger,
+              angCode: inquiryId || "Aa55576",
+              labName: params.labName || "آزمایشگاه پوربرات",
+              resultValue: params.resultValue || "۷۵۰.۵",
+              status: "تایید",
+              date: new Date().toLocaleDateString("fa-IR"),
+              savedAt: new Date().toLocaleDateString("fa-IR"),
+            });
+          } catch (e) {}
+        }
         return res.json({
           success: true,
-          message: "استعلام با موفقیت نشان شد"
+          message: "استعلام با موفقیت نشان شد",
         });
+      }
 
-      // 8. Bookmarks
-      case "m_bookmarks":
+      case "m_bookmarks": {
+        if (isDbConnected) {
+          try {
+            const query = [];
+            if (user?._id) query.push({ userId: user._id });
+            if (finger) query.push({ finger });
+
+            if (query.length > 0) {
+              const bookmarks = await Bookmark.find({ $or: query }).sort({
+                createdAt: -1,
+              });
+              if (bookmarks && bookmarks.length > 0) {
+                return res.json({
+                  success: true,
+                  data: bookmarks.map((b) => ({
+                    id: b._id.toString(),
+                    angCode: b.angCode,
+                    labName: b.labName,
+                    resultValue: b.resultValue,
+                    status: b.status,
+                    date: b.date,
+                    savedAt: b.savedAt,
+                  })),
+                });
+              }
+            }
+          } catch (e) {}
+        }
+
         return res.json({
           success: true,
           data: [
-            { id: "BM-001", angCode: "Aa55576", labName: "آزمایشگاه پوربرات", resultValue: "۷۵۰.۵", status: "تایید", date: "۱۴۰۵/۰۲/۱۵", savedAt: "۱۴۰۵/۰۲/۱۵" }
-          ]
+            {
+              id: "BM-001",
+              angCode: "Aa55576",
+              labName: "آزمایشگاه پوربرات",
+              resultValue: "۷۵۰.۵",
+              status: "تایید",
+              date: "۱۴۰۵/۰۲/۱۵",
+              savedAt: "۱۴۰۵/۰۲/۱۵",
+            },
+          ],
         });
+      }
 
-      // 9. Labs
-      case "m_labs":
-        return res.json({ success: true, data: DEFAULT_LABS });
-
-      // 10. Top Labs
-      case "m_top_labs":
-        return res.json({ success: true, data: DEFAULT_TOP_LABS });
-
-      // 11. Home Banners
-      case "m_home_banners":
-        return res.json({ success: true, data: DEFAULT_BANNERS });
-
-      // 12. Orders (Lab view)
+      // ═══════════════════════════════════════════════════════════
+      // 6. Orders (Lab & Gold seller orders)
+      // ═══════════════════════════════════════════════════════════
       case "m_orders":
-        return res.json({ success: true, data: DEFAULT_ORDERS });
+      case "m_seller_orders": {
+        if (isDbConnected) {
+          try {
+            const orders = await Order.find().sort({ createdAt: -1 });
+            if (orders && orders.length > 0) {
+              return res.json({
+                success: true,
+                data: orders.map((o) => ({
+                  id: o.orderId,
+                  sellerId: o.sellerId,
+                  sellerName: o.sellerName,
+                  sellerPhone: o.sellerPhone,
+                  labId: o.labId,
+                  labName: o.labName,
+                  meltMethod: o.meltMethod,
+                  source: o.source,
+                  estimatedWeight: o.estimatedWeight,
+                  bookingDateLabel: o.bookingDateLabel,
+                  status: o.status,
+                  hasJewel: o.hasJewel,
+                  wage: o.wage,
+                  labFeeAmount: o.labFeeAmount,
+                  labFeeType: o.labFeeType,
+                  sampleDelivered: o.sampleDelivered,
+                  proformaNumber: o.proformaNumber,
+                  receivedWeight: o.receivedWeight,
+                  stampCode: o.stampCode,
+                  deliveredWeight: o.deliveredWeight,
+                  purity: o.purity,
+                  createdAt: o.createdAt
+                    ? new Date(o.createdAt).toLocaleDateString("fa-IR")
+                    : "۱۴۰۴/۰۳/۱۰",
+                })),
+              });
+            }
+          } catch (e) {}
+        }
 
-      // 13. Seller Orders
-      case "m_seller_orders":
-        return res.json({ success: true, data: DEFAULT_ORDERS });
+        return res.json({
+          success: true,
+          data: [
+            {
+              id: "ORD-1001",
+              sellerId: "s1",
+              sellerName: "گالری طلا و جواهر احسان",
+              sellerPhone: "09123456787",
+              labId: "l1",
+              labName: "آزمایشگاه پوربرات",
+              meltMethod: "traditional",
+              source: "online",
+              estimatedWeight: 150,
+              bookingDateLabel: "امروز - ۱۰:۰۰",
+              status: "pending",
+              hasJewel: true,
+              wage: null,
+              labFeeAmount: 150000,
+              labFeeType: "toman",
+              sampleDelivered: true,
+              createdAt: "۱۴۰۴/۰۳/۱۰",
+            },
+            {
+              id: "ORD-0998",
+              sellerId: "s1",
+              sellerName: "گالری طلا و جواهر احسان",
+              sellerPhone: "09123456787",
+              labId: "l1",
+              labName: "آزمایشگاه پوربرات",
+              meltMethod: "traditional",
+              source: "online",
+              estimatedWeight: 90,
+              bookingDateLabel: "دیروز - ۱۶:۰۰",
+              status: "received",
+              wage: { type: "gram", value: 2 },
+              proformaNumber: "PF-2025",
+              receivedWeight: 92,
+              createdAt: "۱۴۰۴/۰۳/۰۸",
+            },
+          ],
+        });
+      }
 
-      // 14. Add Order
-      case "m_add_order":
+      case "m_add_order": {
+        const orderId = `ORD-${Math.floor(1000 + Math.random() * 9000)}`;
+        if (isDbConnected) {
+          try {
+            await Order.create({
+              orderId,
+              sellerName: params.sellerName || user?.name || "گالری طلا",
+              sellerPhone: params.sellerPhone || user?.mobile || "",
+              labName: params.labName || "آزمایشگاه پوربرات",
+              estimatedWeight: Number(params.estimatedWeight) || 100,
+              meltMethod: params.meltMethod || "traditional",
+              finger,
+              status: "pending",
+            });
+          } catch (e) {}
+        }
+
         return res.json({
           success: true,
           message: "سفارش با موفقیت ثبت شد",
           data: {
-            id: `ORD-${Math.floor(1000 + Math.random() * 9000)}`,
+            id: orderId,
             status: "pending",
-            createdAt: "۱۴۰۴/۰۳/۱۰"
-          }
+            createdAt: new Date().toLocaleDateString("fa-IR"),
+          },
         });
+      }
 
-      // 15. Confirm Order
-      case "m_confirm_order":
+      case "m_confirm_order": {
+        const orderId = params.orderId;
+        if (isDbConnected && orderId) {
+          try {
+            await Order.findOneAndUpdate(
+              { orderId },
+              {
+                status: "confirmed",
+                wage: {
+                  type: params.wageType || "toman",
+                  value: Number(params.wageValue) || 150000,
+                },
+                proformaNumber: `PF-${Math.floor(1000 + Math.random() * 9000)}`,
+              }
+            );
+          } catch (e) {}
+        }
         return res.json({
           success: true,
           message: "سفارش با موفقیت تایید شد",
-          data: { id: params.orderId || "ORD-1001", status: "confirmed" }
+          data: { id: orderId || "ORD-1001", status: "confirmed" },
         });
+      }
 
-      // 16. Receive Order
-      case "m_receive_order":
+      case "m_receive_order": {
+        const orderId = params.orderId;
+        if (isDbConnected && orderId) {
+          try {
+            await Order.findOneAndUpdate(
+              { orderId },
+              {
+                status: "received",
+                receivedWeight: Number(params.receivedWeight) || 150,
+              }
+            );
+          } catch (e) {}
+        }
         return res.json({
           success: true,
           message: "طلا با موفقیت دریافت شد",
-          data: { id: params.orderId || "ORD-1001", status: "received", receivedWeight: params.receivedWeight || 150 }
+          data: {
+            id: orderId || "ORD-1001",
+            status: "received",
+            receivedWeight: params.receivedWeight || 150,
+          },
         });
+      }
 
-      // 17. Melt Order
-      case "m_melt_order":
+      case "m_melt_order": {
+        const orderId = params.orderId;
+        if (isDbConnected && orderId) {
+          try {
+            await Order.findOneAndUpdate(
+              { orderId },
+              {
+                status: "melted",
+                meltedAtLabel: new Date().toLocaleDateString("fa-IR"),
+              }
+            );
+          } catch (e) {}
+        }
         return res.json({
           success: true,
           message: "ذوب با موفقیت ثبت شد",
-          data: { id: params.orderId || "ORD-1001", status: "melted" }
+          data: { id: orderId || "ORD-1001", status: "melted" },
         });
+      }
 
-      // 18. Deliver Order
-      case "m_deliver_order":
+      case "m_deliver_order": {
+        const orderId = params.orderId;
+        if (isDbConnected && orderId) {
+          try {
+            await Order.findOneAndUpdate(
+              { orderId },
+              {
+                status: "delivered",
+                deliveryType: params.deliveryType || "final",
+                stampCode: params.stampCode || "Ab115000",
+                deliveredWeight: Number(params.deliveredWeight) || 140,
+                purity: Number(params.purity) || 750,
+              }
+            );
+          } catch (e) {}
+        }
         return res.json({
           success: true,
           message: "طلا با موفقیت تحویل داده شد",
-          data: { id: params.orderId || "ORD-1001", status: "delivered" }
+          data: { id: orderId || "ORD-1001", status: "delivered" },
         });
+      }
 
-      // 19. Archive Order
-      case "m_archive_order":
-        return res.json({ success: true, message: "سفارش با موفقیت بایگانی شد" });
+      case "m_archive_order": {
+        if (isDbConnected && params.orderId) {
+          try {
+            await Order.findOneAndUpdate(
+              { orderId: params.orderId },
+              { status: "archived" }
+            );
+          } catch (e) {}
+        }
+        return res.json({
+          success: true,
+          message: "سفارش با موفقیت بایگانی شد",
+        });
+      }
 
-      // 20. Cancel Order
-      case "m_cancel_order":
-        return res.json({ success: true, message: "سفارش با موفقیت لغو شد" });
+      case "m_cancel_order": {
+        if (isDbConnected && params.orderId) {
+          try {
+            await Order.findOneAndUpdate(
+              { orderId: params.orderId },
+              { status: "cancelled" }
+            );
+          } catch (e) {}
+        }
+        return res.json({
+          success: true,
+          message: "سفارش با موفقیت لغو شد",
+        });
+      }
 
-      // 21. Assign Ang Code
-      case "m_assign_ang":
+      case "m_assign_ang": {
+        if (isDbConnected && params.orderId) {
+          try {
+            await Order.findOneAndUpdate(
+              { orderId: params.orderId },
+              { stampCode: params.stampCode || "Ab115001" }
+            );
+          } catch (e) {}
+        }
         return res.json({
           success: true,
           message: "کد انگ با موفقیت ثبت شد",
-          data: { id: params.orderId || "ORD-1001", stampCode: params.stampCode || "Ab115001" }
+          data: {
+            id: params.orderId || "ORD-1001",
+            stampCode: params.stampCode || "Ab115001",
+          },
         });
+      }
 
-      // 22. Resolve Trust
-      case "m_resolve_trust":
+      case "m_resolve_trust": {
+        if (isDbConnected && params.orderId) {
+          try {
+            await Order.findOneAndUpdate(
+              { orderId: params.orderId },
+              {
+                purity: Number(params.purity) || 750,
+                purityResolvedAt: new Date().toLocaleDateString("fa-IR"),
+              }
+            );
+          } catch (e) {}
+        }
         return res.json({
           success: true,
           message: "عیار امانت با موفقیت تعیین شد",
-          data: { id: params.orderId || "ORD-0960", purity: params.purity || 750 }
+          data: { id: params.orderId || "ORD-0960", purity: params.purity || 750 },
         });
+      }
 
-      // 23. Rental Requests
-      case "m_rental_requests":
+      // ═══════════════════════════════════════════════════════════
+      // 7. Rental & Project Requests
+      // ═══════════════════════════════════════════════════════════
+      case "m_rental_requests": {
+        if (isDbConnected) {
+          try {
+            const requests = await RentalRequest.find().sort({
+              createdAt: -1,
+            });
+            if (requests && requests.length > 0) {
+              return res.json({
+                success: true,
+                data: requests.map((r) => ({
+                  id: r.requestId,
+                  type: r.type,
+                  status: r.status,
+                  workshopName: r.workshopName,
+                  date: r.date,
+                  createdAt: r.createdAt
+                    ? new Date(r.createdAt).toLocaleDateString("fa-IR")
+                    : "۱۴۰۴/۰۲/۱۰",
+                  fields: r.fields,
+                })),
+              });
+            }
+          } catch (e) {}
+        }
+
         return res.json({
           success: true,
           data: [
@@ -422,25 +821,58 @@ exports.handleOperation = async (req, res) => {
               status: "در حال بررسی",
               workshopName: "کارگاه صنعتی امید",
               date: "۱۴۰۴/۰۲/۱۵",
-              createdAt: "1404/02/10"
-            }
-          ]
+              createdAt: "1404/02/10",
+            },
+          ],
         });
+      }
 
-      // 24. Submit Rental
-      case "m_submit_rental":
+      case "m_submit_rental": {
+        const requestId = `RENT-${Math.floor(100 + Math.random() * 900)}`;
+        if (isDbConnected) {
+          try {
+            await RentalRequest.create({
+              requestId,
+              workshopName: params.workshopName || "کارگاه جدید",
+              date: new Date().toLocaleDateString("fa-IR"),
+              finger,
+              userId: user?._id || null,
+              fields: params.fields || params,
+            });
+          } catch (e) {}
+        }
         return res.json({
           success: true,
           message: "درخواست کرایه با موفقیت ثبت شد",
-          data: { id: `RENT-${Date.now().toString().slice(-3)}`, status: "در حال بررسی" }
+          data: { id: requestId, status: "در حال بررسی" },
         });
+      }
 
-      // 25. Remove Form
-      case "m_remove_form":
-        return res.json({ success: true, message: "فرم با موفقیت حذف شد" });
+      case "m_project_requests": {
+        if (isDbConnected) {
+          try {
+            const projects = await ProjectRequest.find().sort({
+              createdAt: -1,
+            });
+            if (projects && projects.length > 0) {
+              return res.json({
+                success: true,
+                data: projects.map((p) => ({
+                  id: p.projectId,
+                  type: p.type,
+                  status: p.status,
+                  workshopName: p.workshopName,
+                  category: p.category,
+                  createdAt: p.createdAt
+                    ? new Date(p.createdAt).toLocaleDateString("fa-IR")
+                    : "۱۴۰۴/۰۲/۰۵",
+                  fields: p.fields,
+                })),
+              });
+            }
+          } catch (e) {}
+        }
 
-      // 26. Project Requests
-      case "m_project_requests":
         return res.json({
           success: true,
           data: [
@@ -450,62 +882,216 @@ exports.handleOperation = async (req, res) => {
               status: "pending",
               workshopName: "شرکت ساختمانی آریا",
               category: "ساختمانی",
-              createdAt: "1404/02/05"
-            }
-          ]
+              createdAt: "1404/02/05",
+            },
+          ],
         });
+      }
 
-      // 27. Submit Project
-      case "m_submit_project":
+      case "m_submit_project": {
+        const projectId = `PROJ-${Math.floor(100 + Math.random() * 900)}`;
+        if (isDbConnected) {
+          try {
+            await ProjectRequest.create({
+              projectId,
+              workshopName: params.workshopName || "پروژه جدید",
+              category: params.category || "عمومی",
+              finger,
+              userId: user?._id || null,
+              fields: params.fields || params,
+            });
+          } catch (e) {}
+        }
         return res.json({
           success: true,
           message: "درخواست پروژه‌ای با موفقیت ثبت شد",
-          data: { id: `PROJ-${Date.now().toString().slice(-3)}`, status: "pending" }
+          data: { id: projectId, status: "pending" },
         });
+      }
 
-      // 28. Hesab / Financials
+      case "m_remove_form": {
+        if (isDbConnected && params.formId) {
+          try {
+            await RentalRequest.deleteOne({ requestId: params.formId });
+            await ProjectRequest.deleteOne({ projectId: params.formId });
+          } catch (e) {}
+        }
+        return res.json({
+          success: true,
+          message: "فرم با موفقیت حذف شد",
+        });
+      }
+
+      // ═══════════════════════════════════════════════════════════
+      // 8. Financial, Support, Notifications, Dashboard, Labs
+      // ═══════════════════════════════════════════════════════════
       case "m_hesab":
         return res.json({
           success: true,
           message: "گردش حساب بارگذاری شد.",
           list: [
-            { date: "1404/01/01", description: "اولیه", bes: "0", bed: "0", mnds: "0", mndv: "بی حساب" },
-            { date: "1404/01/15", description: "فروش ری‌گیری - ORD-1001", bes: "۵۰۰,۰۰۰", bed: "0", mnds: "۵۰۰,۰۰۰", mndv: "بدهکار" }
+            {
+              date: "1404/01/01",
+              description: "اولیه",
+              bes: "0",
+              bed: "0",
+              mnds: "0",
+              mndv: "بی حساب",
+            },
+            {
+              date: "1404/01/15",
+              description: "فروش ری‌گیری - ORD-1001",
+              bes: "۵۰۰,۰۰۰",
+              bed: "0",
+              mnds: "۵۰۰,۰۰۰",
+              mndv: "بدهکار",
+            },
           ],
           kols: "۱,۰۷۰,۰۰۰",
           kolv: "بدهکار",
-          kolr: "۱,۰۷۰,۰۰۰"
+          kolr: "۱,۰۷۰,۰۰۰",
         });
 
-      // 29. Referral
       case "m_submit_referral":
         return res.json({
           success: true,
-          message: "درخواست عضویت همکار با موفقیت ثبت شد و در انتظار تایید مدیریت است."
+          message:
+            "درخواست عضویت همکار با موفقیت ثبت شد و در انتظار تایید مدیریت است.",
         });
 
-      // 30. Support Ticket
       case "m_support_ticket":
         return res.json({
           success: true,
           message: "تیکت پشتیبانی با موفقیت ثبت شد",
-          data: { id: "TKT-001", status: "open" }
+          data: { id: "TKT-001", status: "open" },
         });
 
-      // 31. Notifications
-      case "m_notifications":
+      case "m_notifications": {
+        if (isDbConnected) {
+          try {
+            const notifs = await Notification.find({
+              $or: [{ userId: user?._id }, { finger }],
+            }).sort({ createdAt: -1 });
+            if (notifs && notifs.length > 0) {
+              return res.json({
+                success: true,
+                data: notifs.map((n) => ({
+                  id: n.notifId,
+                  title: n.title,
+                  message: n.message,
+                  type: n.type,
+                  isRead: n.isRead,
+                  createdAt: new Date(n.createdAt).toLocaleDateString("fa-IR"),
+                })),
+              });
+            }
+          } catch (e) {}
+        }
+
         return res.json({
           success: true,
           data: [
-            { id: "NOTIF-001", title: "ثبت سفارش جدید", message: "سفارش جدید از گالری طلا و جواهر احسان ثبت شد", type: "order", isRead: false, createdAt: "۱۴۰۴/۰۳/۱۰ - ۱۰:۰۰" }
-          ]
+            {
+              id: "NOTIF-001",
+              title: "ثبت سفارش جدید",
+              message: "سفارش جدید از گالری طلا و جواهر احسان ثبت شد",
+              type: "order",
+              isRead: false,
+              createdAt: "۱۴۰۴/۰۳/۱۰ - ۱۰:۰۰",
+            },
+          ],
+        });
+      }
+
+      case "m_mark_notification_read":
+        return res.json({
+          success: true,
+          message: "اعلان با موفقیت به‌روزرسانی شد",
         });
 
-      // 32. Mark Notification Read
-      case "m_mark_notification_read":
-        return res.json({ success: true, message: "اعلان با موفقیت به‌روزرسانی شد" });
+      case "m_labs": {
+        if (isDbConnected) {
+          try {
+            const labs = await Lab.find({ isActive: true });
+            if (labs && labs.length > 0) {
+              return res.json({ success: true, data: labs });
+            }
+          } catch (e) {}
+        }
+        return res.json({
+          success: true,
+          data: [
+            {
+              id: 1,
+              name: "آزمایشگاه پوربرات",
+              city: "مشهد",
+              phone: "۰۵۸۳۲۲۲۹۹۳۲",
+              address: "مشهد، خیابان طبرسی",
+              score: 87,
+              isActive: true,
+            },
+            {
+              id: 2,
+              name: "آزمایشگاه صحرانورد",
+              city: "مشهد",
+              phone: "۰۵۸۳۲۲۲۶۷۲۳",
+              address: "مشهد، خیابان امام خمینی",
+              score: 76,
+              isActive: true,
+            },
+            {
+              id: 3,
+              name: "آزمایشگاه یزدانی",
+              city: "تهران",
+              phone: "۰۲۱۳۳۴۴۵۵۶۶",
+              address: "تهران، خیابان ولیعصر",
+              score: 72,
+              isActive: true,
+            },
+          ],
+        });
+      }
 
-      // 33. Lab Dashboard
+      case "m_top_labs":
+        return res.json({
+          success: true,
+          data: [
+            {
+              rank: "۱",
+              name: "آزمایشگاه پوربرات",
+              score: "۸۷",
+              phone: "۰۵۸۳۲۲۲۹۹۳۲",
+              city: "مشهد",
+            },
+            {
+              rank: "۲",
+              name: "آزمایشگاه صحرانورد",
+              score: "۷۶",
+              phone: "۰۵۸۳۲۲۲۶۷۲۳",
+              city: "مشهد",
+            },
+          ],
+        });
+
+      case "m_home_banners":
+        return res.json({
+          success: true,
+          data: [
+            {
+              id: "1",
+              title: "استعلام اصالت طلا",
+              desc: "با وارد کردن کد انگ، اصالت طلا را بررسی کنید",
+              color: "#DFEDFD",
+            },
+            {
+              id: "2",
+              title: "آزمایشگاه‌های معتبر",
+              desc: "لیست آزمایشگاه‌های ری‌گیری معتبر کشور",
+              color: "#FFF3DD",
+            },
+          ],
+        });
+
       case "m_dashboard":
         return res.json({
           success: true,
@@ -518,11 +1104,10 @@ exports.handleOperation = async (req, res) => {
             archivedOrders: 2,
             cancelledOrders: 1,
             totalOrders: 7,
-            totalRevenue: "۱,۰۷۰,۰۰۰"
-          }
+            totalRevenue: "۱,۰۷۰,۰۰۰",
+          },
         });
 
-      // 34. Admin Dashboard
       case "m_admin_dashboard":
         return res.json({
           success: true,
@@ -531,21 +1116,31 @@ exports.handleOperation = async (req, res) => {
             totalLabs: 5,
             totalSellers: 3,
             totalOrders: 7,
-            totalInquiries: 5
-          }
+            totalInquiries: 5,
+          },
         });
 
-      // 35. Workshops
       case "m_workshops":
         return res.json({
           success: true,
           data: [
-            { id: 1, name: "کارگاه صنعتی امید", city: "مشهد", phone: "۰۵۱۳۲۲۲۱۱۲۲", type: "industrial" },
-            { id: 2, name: "کارگاه ساختمانی پارس", city: "تهران", phone: "۰۲۱۳۳۴۴۵۵۷۷", type: "construction" }
-          ]
+            {
+              id: 1,
+              name: "کارگاه صنعتی امید",
+              city: "مشهد",
+              phone: "۰۵۱۳۲۲۲۱۱۲۲",
+              type: "industrial",
+            },
+            {
+              id: 2,
+              name: "کارگاه ساختمانی پارس",
+              city: "تهران",
+              phone: "۰۲۱۳۳۴۴۵۵۷۷",
+              type: "construction",
+            },
+          ],
         });
 
-      // 36. File Upload
       case "m_upload": {
         const file = req.file;
         const fileName = file ? file.filename : `uploaded_${Date.now()}.jpg`;
@@ -553,7 +1148,7 @@ exports.handleOperation = async (req, res) => {
           success: true,
           message: "آپلود فایل با موفقیت انجام شد.",
           file: fileName,
-          fileUrl: `https://raygnd.blhgroups.ir/uploads/${fileName}`
+          fileUrl: `https://raygnd.blhgroups.ir/uploads/${fileName}`,
         });
       }
 
@@ -561,7 +1156,7 @@ exports.handleOperation = async (req, res) => {
         return res.json({
           success: true,
           op,
-          message: `عملیات ${op} با موفقیت دریافت شد`
+          message: `عملیات ${op} با موفقیت دریافت شد`,
         });
     }
   } catch (err) {
