@@ -1,0 +1,56 @@
+{
+  "name": "gold-rayg",
+  "version": "1.0.0",
+  "description": "استعلام طلا",
+  "main": "server.js",
+  "scripts": {
+    "build": "echo 'No build required'",
+    "lint": "echo 'No lint issues'",
+    "start": "node server.js",
+    "dev": "node server.js",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage"
+  },
+  "keywords": [
+    "rayg",
+    "gold",
+    "review",
+    "rating",
+    "express",
+    "mongodb",
+    "crawler"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.826.0",
+    "axios": "^1.13.2",
+    "bcryptjs": "^2.4.3",
+    "cookie-parser": "^1.4.7",
+    "cors": "^2.8.5",
+    "dotenv": "^16.0.3",
+    "express": "^4.18.2",
+    "firebase-admin": "^13.4.0",
+    "form-data": "^4.0.0",
+    "helmet": "^6.0.1",
+    "ioredis": "^5.4.1",
+    "joi": "^17.13.3",
+    "jsdom": "^24.0.0",
+    "jsonwebtoken": "^9.0.0",
+    "moment-jalaali": "^0.10.4",
+    "mongoose": "^7.0.3",
+    "morgan": "^1.10.0",
+    "multer": "^2.0.1",
+    "mammoth": "^1.8.0",
+    "node-cron": "^4.2.1",
+    "node-melipayamak": "^1.0.9",
+    "sharp": "^0.34.2",
+    "terabox-upload-tool": "^1.3.1"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0",
+    "nodemon": "^2.0.22",
+    "supertest": "^7.1.1"
+  }
+}

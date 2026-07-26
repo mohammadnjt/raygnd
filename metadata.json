@@ -1,0 +1,8 @@
+{
+  "name": "Rayg Gold Report API",
+  "description": "API service for Rayg gold inquiry and reports",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
