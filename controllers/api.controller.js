@@ -151,7 +151,11 @@ async function resolveUser(req) {
 exports.handleOperation = async (req, res) => {
   try {
     const params = { ...req.query, ...req.body };
-    const op = params.op || req.params.op;
+    let op = params.op || req.params.op;
+
+    if (op && typeof op === "string") {
+      op = op.replace(/^=+/, "");
+    }
 
     if (!op) {
       return res
@@ -1211,7 +1215,7 @@ exports.handleOperation = async (req, res) => {
       case "m_users":
       case "m_get_users": {
         if (!user || (user.role !== "superAdmin" && user.role !== "admin")) {
-          return res.status(403).json({
+          return res.status(401).json({
             success: false,
             message: "دسترسی غیرمجاز. فقط کاربران با نقش سوپر ادمین به این بخش دسترسی دارند.",
           });
@@ -1318,7 +1322,7 @@ exports.handleOperation = async (req, res) => {
       case "m_create_user":
       case "m_add_user": {
         if (!user || (user.role !== "superAdmin" && user.role !== "admin")) {
-          return res.status(403).json({
+          return res.status(401).json({
             success: false,
             message: "دسترسی غیرمجاز. فقط کاربران با نقش سوپر ادمین به این بخش دسترسی دارند.",
           });
@@ -1414,7 +1418,7 @@ exports.handleOperation = async (req, res) => {
       case "m_edit_user":
       case "m_admin_edit_user": {
         if (!user || (user.role !== "superAdmin" && user.role !== "admin")) {
-          return res.status(403).json({
+          return res.status(401).json({
             success: false,
             message: "دسترسی غیرمجاز. فقط کاربران با نقش سوپر ادمین به این بخش دسترسی دارند.",
           });
@@ -1508,7 +1512,7 @@ exports.handleOperation = async (req, res) => {
       case "m_delete_user":
       case "m_remove_user": {
         if (!user || (user.role !== "superAdmin" && user.role !== "admin")) {
-          return res.status(403).json({
+          return res.status(401).json({
             success: false,
             message: "دسترسی غیرمجاز. فقط کاربران با نقش سوپر ادمین به این بخش دسترسی دارند.",
           });
@@ -2024,7 +2028,7 @@ exports.handleOperation = async (req, res) => {
 
       case "m_admin_dashboard": {
         if (!user || (user.role !== "superAdmin" && user.role !== "admin")) {
-          return res.status(403).json({
+          return res.status(401).json({
             success: false,
             message: "دسترسی غیرمجاز. فقط کاربران با نقش سوپر ادمین به این بخش دسترسی دارند.",
           });

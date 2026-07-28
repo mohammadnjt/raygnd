@@ -283,7 +283,7 @@ describe("Gold Inquiry & Rayg API Test Suite", () => {
         .get("/api?op=m_admin_users&page=1&limit=10")
         .set("Authorization", `Bearer ${customerToken}`);
 
-      expect(res.statusCode).toBe(403);
+      expect(res.statusCode).toBe(401);
       expect(res.body.success).toBe(false);
     });
 
