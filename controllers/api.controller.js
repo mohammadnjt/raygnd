@@ -29,56 +29,62 @@ function generateCryptoFinger(seed = "") {
   );
 }
 
-// Helper to extract caller user / finger
-async function resolveCaller(req) {
+// Helper to extract and verify caller JWT token
+async function resolveUser(req) {
   const params = { ...req.query, ...req.body };
-  let finger =
-    req.headers["x-user-finger"] ||
-    params.finger ||
-    req.headers["finger"];
+  let token = null;
 
-  let user = req.user || null;
+  if (req.headers.authorization) {
+    token = req.headers.authorization.replace(/^Bearer\s+/i, "").trim();
+  } else if (req.headers["x-access-token"]) {
+    token = req.headers["x-access-token"];
+  } else if (req.headers["x-auth-token"]) {
+    token = req.headers["x-auth-token"];
+  } else if (params.token) {
+    token = params.token;
+  } else if (req.cookies && req.cookies.jwt) {
+    token = req.cookies.jwt;
+  }
 
-  if (!user && req.headers.authorization) {
-    try {
-      const token = req.headers.authorization.replace("Bearer ", "");
-      const decoded = jwt.verify(
-        token,
-        process.env.JWT_SECRET || "your-secret-key"
-      );
-      if (decoded) {
-        if (decoded.userId && mongoose.connection.readyState === 1) {
-          user = await User.findById(decoded.userId);
-        }
-        if ((!finger || finger === "guest_finger") && decoded.finger) {
-          finger = decoded.finger;
-        }
+  if (!token) {
+    return { user: null, token: null, error: "توکن ارائه نشده است" };
+  }
+
+  try {
+    const decoded = jwt.verify(
+      token,
+      process.env.JWT_SECRET || "your-secret-key"
+    );
+
+    let user = req.user || null;
+    const isDbConnected = mongoose.connection.readyState === 1;
+
+    if (!user && decoded) {
+      if (decoded.userId && isDbConnected) {
+        user = await User.findById(decoded.userId);
       }
-    } catch (e) {}
-  }
-
-  if (user && user.finger && user.finger !== "guest_finger") {
-    if (!finger || finger === "guest_finger") {
-      finger = user.finger;
+      if (!user && decoded.mobile && isDbConnected) {
+        user = await User.findOne({ mobile: decoded.mobile });
+      }
     }
-  }
 
-  // Fallback find user by finger if logged in previously
-  if (!user && finger && finger !== "guest_finger" && mongoose.connection.readyState === 1) {
-    try {
-      user = await User.findOne({ finger });
-    } catch (e) {}
-  }
-
-  if (!finger || finger === "guest_finger") {
-    if (user && user.mobile) {
-      finger = generateCryptoFinger(`user_${user.mobile}`);
-    } else {
-      finger = "f_" + crypto.randomBytes(8).toString("hex");
+    if (!user && decoded) {
+      const mob = decoded.mobile || "09123456789";
+      user = {
+        _id: decoded.userId || "temp_id",
+        id: decoded.userId || Date.now(),
+        mobile: mob,
+        role: decoded.role || "customer",
+        name: `کاربر ${mob.slice(-4)}`,
+        fname: "کاربر",
+        lname: mob.slice(-4),
+      };
     }
-  }
 
-  return { finger, user };
+    return { user, token, decoded, error: null };
+  } catch (err) {
+    return { user: null, token, error: "توکن معتبر نیست یا منقضی شده است" };
+  }
 }
 
 // Unified Operation Handler
@@ -93,7 +99,19 @@ exports.handleOperation = async (req, res) => {
         .json({ success: false, message: "پارامتر op ارسال نشده است" });
     }
 
-    const { finger, user } = await resolveCaller(req);
+    const publicOps = ["m_version", "m_login", "m_verify", "m_inquiry"];
+    const isPublicOp = publicOps.includes(op);
+
+    const auth = await resolveUser(req);
+    const user = auth.user;
+
+    if (!isPublicOp && (!user || auth.error)) {
+      return res.status(401).json({
+        success: false,
+        message: auth.error || "دستور نیازمند احراز هویت است. لطفاً توکن معتبر ارسال کنید.",
+      });
+    }
+
     const isDbConnected = mongoose.connection.readyState === 1;
 
     switch (op) {
@@ -114,15 +132,6 @@ exports.handleOperation = async (req, res) => {
       case "m_login": {
         const mobile =
           params.username || params.mob || params.mobile || "09123456789";
-        let reqFinger =
-          params.finger ||
-          req.headers["x-user-finger"] ||
-          req.headers["finger"] ||
-          finger;
-
-        if (!reqFinger || reqFinger === "guest_finger") {
-          reqFinger = generateCryptoFinger(`user_${mobile}`);
-        }
 
         // Rate limiting check: Max 5 OTP requests per mobile in 2 hours (7200s)
         const rateKey = `otp_count:${mobile}`;
@@ -156,23 +165,16 @@ exports.handleOperation = async (req, res) => {
           if (!dbUser) {
             dbUser = await User.create({
               mobile,
-              finger: reqFinger,
               name: `کاربر ${mobile.slice(-4)}`,
               role: "customer",
             });
-          } else {
-            dbUser.finger = reqFinger;
-            await dbUser.save();
           }
         }
-
-        const userFinger = dbUser?.finger || reqFinger;
 
         return res.json({
           success: true,
           message: "کد تایید برای شما ارسال شد",
           code: 12345,
-          finger: userFinger,
           user: dbUser || {
             id: Date.now(),
             mobile,
@@ -180,7 +182,6 @@ exports.handleOperation = async (req, res) => {
             lname: mobile.slice(-4),
             name: `کاربر ${mobile.slice(-4)}`,
             role: "customer",
-            finger: userFinger,
           },
         });
       }
@@ -188,15 +189,6 @@ exports.handleOperation = async (req, res) => {
       case "m_verify": {
         const code = params.code;
         const mobile = params.username || params.mob || params.mobile || "09123456789";
-        let activeFinger =
-          params.finger ||
-          req.headers["x-user-finger"] ||
-          req.headers["finger"] ||
-          finger;
-
-        if (!activeFinger || activeFinger === "guest_finger") {
-          activeFinger = generateCryptoFinger(`user_${mobile}`);
-        }
 
         // Verify OTP from Redis or fallback 12345
         let validCode = "12345";
@@ -218,37 +210,24 @@ exports.handleOperation = async (req, res) => {
           if (!targetUser) {
             targetUser = await User.create({
               mobile,
-              finger: activeFinger,
               name: `کاربر ${mobile.slice(-4)}`,
               role: "customer",
             });
-          } else {
-            targetUser.finger = activeFinger;
-            await targetUser.save();
           }
         }
 
-        const finalFinger = targetUser?.finger || activeFinger;
+        const userId = targetUser ? targetUser._id : `user_${mobile}`;
+        const userRole = targetUser ? targetUser.role : "customer";
 
-        let token = "";
-        if (targetUser) {
-          token = jwt.sign(
-            {
-              userId: targetUser._id,
-              role: targetUser.role,
-              mobile: targetUser.mobile,
-              finger: finalFinger,
-            },
-            process.env.JWT_SECRET || "your-secret-key",
-            { expiresIn: "30d" }
-          );
-        } else {
-          token = jwt.sign(
-            { mobile, finger: finalFinger, role: "customer" },
-            process.env.JWT_SECRET || "your-secret-key",
-            { expiresIn: "30d" }
-          );
-        }
+        const token = jwt.sign(
+          {
+            userId,
+            mobile,
+            role: userRole,
+          },
+          process.env.JWT_SECRET || "your-secret-key",
+          { expiresIn: "30d" }
+        );
 
         const fallbackUser = {
           id: Date.now(),
@@ -257,11 +236,9 @@ exports.handleOperation = async (req, res) => {
           lname: mobile.slice(-4),
           name: `کاربر ${mobile.slice(-4)}`,
           role: "customer",
-          finger: finalFinger,
         };
 
         return res.json({
-          finger: finalFinger,
           token,
           success: true,
           message: "ورود موفقیت‌آمیز",
@@ -271,33 +248,9 @@ exports.handleOperation = async (req, res) => {
 
       case "m_profile": {
         let targetUser = user;
-        const mobile = params.username || params.mob || params.mobile;
-        const rawFinger =
-          params.finger ||
-          req.headers["x-user-finger"] ||
-          req.headers["finger"];
-
-        // Return empty response if finger is missing, empty, or guest_finger
-        if (!rawFinger || rawFinger === "guest_finger" || !rawFinger.trim()) {
-          if (!mobile && !user) {
-            return res.json({
-              success: false,
-              message: "فینگر ارسال نشده است",
-              data: null,
-            });
-          }
-        }
-
-        if (isDbConnected && !targetUser) {
-          if (mobile) {
-            targetUser = await User.findOne({ mobile });
-          } else if (finger && finger !== "guest_finger") {
-            targetUser = await User.findOne({ finger });
-          }
-        }
 
         if (params.fname || params.lname || params.name || params.email || params.address || params.city) {
-          if (isDbConnected && targetUser) {
+          if (isDbConnected && targetUser && targetUser._id) {
             targetUser.fname = params.fname || targetUser.fname;
             targetUser.lname = params.lname || targetUser.lname;
             targetUser.name = params.name || `${targetUser.fname} ${targetUser.lname}`.trim();
@@ -305,22 +258,25 @@ exports.handleOperation = async (req, res) => {
             targetUser.address = params.address || targetUser.address;
             targetUser.city = params.city || targetUser.city;
             await targetUser.save();
-
-            return res.json({
-              success: true,
-              message: "پروفایل با موفقیت بروزرسانی شد",
-              data: targetUser,
-            });
+          } else if (targetUser) {
+            targetUser.fname = params.fname || targetUser.fname;
+            targetUser.lname = params.lname || targetUser.lname;
+            targetUser.name = params.name || `${targetUser.fname || ""} ${targetUser.lname || ""}`.trim();
+            targetUser.email = params.email || targetUser.email;
+            targetUser.address = params.address || targetUser.address;
+            targetUser.city = params.city || targetUser.city;
           }
-        }
 
-        if (targetUser) {
-          return res.json({ success: true, data: targetUser });
+          return res.json({
+            success: true,
+            message: "پروفایل با موفقیت بروزرسانی شد",
+            data: targetUser,
+          });
         }
 
         return res.json({
           success: true,
-          data: null,
+          data: targetUser,
         });
       }
 
@@ -356,7 +312,7 @@ exports.handleOperation = async (req, res) => {
               console.log("[m_inquiry] Mongo HIT for code:", code);
               // Update search metadata
               dbRecord.searchCount = (dbRecord.searchCount || 0) + 1;
-              dbRecord.lastSearchedBy = finger;
+              if (user?.mobile) dbRecord.lastSearchedBy = user.mobile;
               await dbRecord.save();
 
               responseData =
@@ -428,7 +384,7 @@ exports.handleOperation = async (req, res) => {
                   code,
                   htmlData: msanjeshResult.htmlData,
                   docText: msanjeshResult.docText,
-                  lastSearchedBy: finger,
+                  lastSearchedBy: user?.mobile || "guest",
                   searchCount: 1,
                 });
                 console.log("[m_inquiry] Successfully saved report to MongoDB:", code);
@@ -486,13 +442,12 @@ exports.handleOperation = async (req, res) => {
           }
         }
 
-        // d) Save search log to InquiryHistory per user/finger!
+        // d) Save search log to InquiryHistory
         if (isDbConnected && responseData && responseData.length > 0) {
           try {
             const topItem = responseData[0];
             await InquiryHistory.create({
               userId: user?._id || null,
-              finger,
               angCode: code,
               labName: topItem.labName || "آزمایشگاه",
               resultValue: topItem.resultValue || "۷۵۰",
@@ -503,7 +458,7 @@ exports.handleOperation = async (req, res) => {
                 minute: "2-digit",
               }),
             });
-            console.log("[m_inquiry] Recorded inquiry history for finger/user:", finger);
+            console.log("[m_inquiry] Recorded inquiry history for user:", user?._id || "guest");
           } catch (e) {
             console.warn("Failed to record inquiry history:", e.message);
           }
@@ -521,31 +476,25 @@ exports.handleOperation = async (req, res) => {
       // ═══════════════════════════════════════════════════════════
       case "m_history":
       case "m_inquiry_history": {
-        if (isDbConnected) {
+        if (isDbConnected && user?._id) {
           try {
-            const query = [];
-            if (user?._id) query.push({ userId: user._id });
-            if (finger) query.push({ finger });
+            const history = await InquiryHistory.find({ userId: user._id })
+              .sort({ createdAt: -1 })
+              .limit(50);
 
-            if (query.length > 0) {
-              const history = await InquiryHistory.find({ $or: query })
-                .sort({ createdAt: -1 })
-                .limit(50);
-
-              if (history && history.length > 0) {
-                return res.json({
-                  success: true,
-                  data: history.map((h, i) => ({
-                    id: h._id.toString(),
-                    angCode: h.angCode,
-                    labName: h.labName,
-                    resultValue: h.resultValue,
-                    status: h.status,
-                    date: h.date,
-                    time: h.time,
-                  })),
-                });
-              }
+            if (history && history.length > 0) {
+              return res.json({
+                success: true,
+                data: history.map((h) => ({
+                  id: h._id.toString(),
+                  angCode: h.angCode,
+                  labName: h.labName,
+                  resultValue: h.resultValue,
+                  status: h.status,
+                  date: h.date,
+                  time: h.time,
+                })),
+              });
             }
           } catch (e) {}
         }
@@ -576,15 +525,15 @@ exports.handleOperation = async (req, res) => {
       }
 
       // ═══════════════════════════════════════════════════════════
-      // 5. Bookmarks (m_bookmark_inquiry, m_bookmarks)
+      // 5. Bookmarks (m_bookmark_inquiry, m_bookmarks, m_add_bookmark, m_remove_bookmark)
       // ═══════════════════════════════════════════════════════════
+      case "m_add_bookmark":
       case "m_bookmark_inquiry": {
-        const inquiryId = params.inquiryId || params.angCode;
-        if (isDbConnected) {
+        const inquiryId = params.inquiryId || params.angCode || params.code;
+        if (isDbConnected && user?._id) {
           try {
             await Bookmark.create({
-              userId: user?._id || null,
-              finger,
+              userId: user._id,
               angCode: inquiryId || "Aa55576",
               labName: params.labName || "آزمایشگاه پوربرات",
               resultValue: params.resultValue || "۷۵۰.۵",
@@ -600,31 +549,38 @@ exports.handleOperation = async (req, res) => {
         });
       }
 
-      case "m_bookmarks": {
-        if (isDbConnected) {
+      case "m_remove_bookmark": {
+        const code = params.code || params.angCode;
+        if (isDbConnected && user?._id && code) {
           try {
-            const query = [];
-            if (user?._id) query.push({ userId: user._id });
-            if (finger) query.push({ finger });
+            await Bookmark.deleteOne({ angCode: code, userId: user._id });
+          } catch (e) {}
+        }
+        return res.json({
+          success: true,
+          message: "نشان با موفقیت حذف شد",
+        });
+      }
 
-            if (query.length > 0) {
-              const bookmarks = await Bookmark.find({ $or: query }).sort({
-                createdAt: -1,
+      case "m_bookmarks": {
+        if (isDbConnected && user?._id) {
+          try {
+            const bookmarks = await Bookmark.find({ userId: user._id }).sort({
+              createdAt: -1,
+            });
+            if (bookmarks && bookmarks.length > 0) {
+              return res.json({
+                success: true,
+                data: bookmarks.map((b) => ({
+                  id: b._id.toString(),
+                  angCode: b.angCode,
+                  labName: b.labName,
+                  resultValue: b.resultValue,
+                  status: b.status,
+                  date: b.date,
+                  savedAt: b.savedAt,
+                })),
               });
-              if (bookmarks && bookmarks.length > 0) {
-                return res.json({
-                  success: true,
-                  data: bookmarks.map((b) => ({
-                    id: b._id.toString(),
-                    angCode: b.angCode,
-                    labName: b.labName,
-                    resultValue: b.resultValue,
-                    status: b.status,
-                    date: b.date,
-                    savedAt: b.savedAt,
-                  })),
-                });
-              }
             }
           } catch (e) {}
         }
@@ -741,7 +697,7 @@ exports.handleOperation = async (req, res) => {
               labName: params.labName || "آزمایشگاه پوربرات",
               estimatedWeight: Number(params.estimatedWeight) || 100,
               meltMethod: params.meltMethod || "traditional",
-              finger,
+              userId: user?._id || null,
               status: "pending",
             });
           } catch (e) {}
@@ -864,7 +820,7 @@ exports.handleOperation = async (req, res) => {
                     },
                   ],
                   docText: `ثبت شده توسط آزمایشگاه ${labName}`,
-                  lastSearchedBy: finger,
+                  lastSearchedBy: user?.mobile || "system",
                 },
                 { upsert: true, new: true }
               );
@@ -946,7 +902,7 @@ exports.handleOperation = async (req, res) => {
                   },
                 ],
                 docText: `ثبت شده توسط ${labName}`,
-                lastSearchedBy: finger,
+                lastSearchedBy: user?.mobile || "system",
               },
               { upsert: true, new: true }
             );
@@ -1042,7 +998,6 @@ exports.handleOperation = async (req, res) => {
               requestId,
               workshopName: params.workshopName || "کارگاه جدید",
               date: new Date().toLocaleDateString("fa-IR"),
-              finger,
               userId: user?._id || null,
               fields: params.fields || params,
             });
@@ -1103,7 +1058,6 @@ exports.handleOperation = async (req, res) => {
               projectId,
               workshopName: params.workshopName || "پروژه جدید",
               category: params.category || "عمومی",
-              finger,
               userId: user?._id || null,
               fields: params.fields || params,
             });
@@ -1174,10 +1128,10 @@ exports.handleOperation = async (req, res) => {
         });
 
       case "m_notifications": {
-        if (isDbConnected) {
+        if (isDbConnected && user?._id) {
           try {
             const notifs = await Notification.find({
-              $or: [{ userId: user?._id }, { finger }],
+              userId: user._id,
             }).sort({ createdAt: -1 });
             if (notifs && notifs.length > 0) {
               return res.json({

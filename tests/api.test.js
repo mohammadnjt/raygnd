@@ -4,7 +4,6 @@ const app = require("../server");
 
 describe("Gold Inquiry & Rayg API Test Suite", () => {
   let authToken = "";
-  let userFinger = `test_finger_${Date.now()}`;
   const testMobile = "09121112233";
 
   beforeAll(async () => {
@@ -18,7 +17,7 @@ describe("Gold Inquiry & Rayg API Test Suite", () => {
   });
 
   describe("1. System APIs", () => {
-    it("GET /api?op=m_version - should return application version info", async () => {
+    it("GET /api?op=m_version - should return application version info without authentication", async () => {
       const res = await request(app).get("/api?op=m_version");
       expect(res.statusCode).toBe(200);
       expect(res.body.success).toBe(true);
@@ -31,7 +30,7 @@ describe("Gold Inquiry & Rayg API Test Suite", () => {
     it("POST /api?op=m_login - should request OTP code for user mobile", async () => {
       const res = await request(app)
         .post("/api?op=m_login")
-        .send({ mobile: testMobile, finger: userFinger });
+        .send({ mobile: testMobile });
 
       expect(res.statusCode).toBe(200);
       expect(res.body.success).toBe(true);
@@ -40,24 +39,21 @@ describe("Gold Inquiry & Rayg API Test Suite", () => {
       expect(res.body.user.mobile).toBe(testMobile);
     });
 
-    it("POST /api?op=m_verify - should verify OTP code and return JWT token and unique user", async () => {
+    it("POST /api?op=m_verify - should verify OTP code and return JWT token and user", async () => {
       const res = await request(app)
         .post("/api?op=m_verify")
         .send({
           mobile: testMobile,
           code: "12345",
-          finger: userFinger,
         });
 
       expect(res.statusCode).toBe(200);
       expect(res.body.success).toBe(true);
       expect(res.body.user).toBeDefined();
       expect(res.body.user.mobile).toBe(testMobile);
-      expect(res.body.finger).toBe(userFinger);
+      expect(res.body.token).toBeDefined();
 
-      if (res.body.token) {
-        authToken = res.body.token;
-      }
+      authToken = res.body.token;
     });
 
     it("POST /api?op=m_verify - should return distinct users for different mobile numbers", async () => {
@@ -66,16 +62,16 @@ describe("Gold Inquiry & Rayg API Test Suite", () => {
 
       const resA = await request(app)
         .post("/api?op=m_verify")
-        .send({ mobile: mobileA, code: "12345", finger: "finger_A" });
+        .send({ mobile: mobileA, code: "12345" });
 
       const resB = await request(app)
         .post("/api?op=m_verify")
-        .send({ mobile: mobileB, code: "12345", finger: "finger_B" });
+        .send({ mobile: mobileB, code: "12345" });
 
       expect(resA.body.user.mobile).toBe(mobileA);
       expect(resB.body.user.mobile).toBe(mobileB);
-      expect(resA.body.finger).toBe("finger_A");
-      expect(resB.body.finger).toBe("finger_B");
+      expect(resA.body.token).toBeDefined();
+      expect(resB.body.token).toBeDefined();
     });
 
     it("POST /api?op=m_login - should enforce rate limit of 5 requests per 2 hours", async () => {
@@ -97,26 +93,22 @@ describe("Gold Inquiry & Rayg API Test Suite", () => {
       expect(blockedRes.body.message).toContain("بیش از ۵ بار");
     });
 
-    it("POST /api?op=m_profile - should return empty response when finger is missing or empty", async () => {
+    it("POST /api?op=m_profile - should fail 401 when token is missing", async () => {
       const res = await request(app).post("/api?op=m_profile").send({});
-      expect(res.statusCode).toBe(200);
+      expect(res.statusCode).toBe(401);
       expect(res.body.success).toBe(false);
-      expect(res.body.data).toBeNull();
     });
 
-    it("POST /api?op=m_profile - should get/update user profile dynamically", async () => {
-      const reqBuilder = request(app).post("/api?op=m_profile");
-      if (authToken) {
-        reqBuilder.set("Authorization", `Bearer ${authToken}`);
-      }
-
-      const res = await reqBuilder.send({
-        mobile: testMobile,
-        fname: "علی",
-        lname: "احمدی",
-        city: "تهران",
-        email: "ali.ahmadi@example.com",
-      });
+    it("POST /api?op=m_profile - should get/update user profile with Bearer token", async () => {
+      const res = await request(app)
+        .post("/api?op=m_profile")
+        .set("Authorization", `Bearer ${authToken}`)
+        .send({
+          fname: "علی",
+          lname: "احمدی",
+          city: "تهران",
+          email: "ali.ahmadi@example.com",
+        });
 
       expect(res.statusCode).toBe(200);
       expect(res.body.success).toBe(true);
@@ -125,16 +117,15 @@ describe("Gold Inquiry & Rayg API Test Suite", () => {
   });
 
   describe("3. Gold Inquiry APIs (m_inquiry, m_history, m_bookmarks)", () => {
-    it("GET /api?op=m_inquiry - should require angCode parameter", async () => {
+    it("GET /api?op=m_inquiry - should require angCode parameter (guest allowed)", async () => {
       const res = await request(app).get("/api?op=m_inquiry");
       expect(res.statusCode).toBe(400);
       expect(res.body.success).toBe(false);
     });
 
-    it("GET /api?op=m_inquiry&angCode=123456 - should return gold assay result", async () => {
+    it("GET /api?op=m_inquiry&angCode=123456 - should return gold assay result (guest allowed)", async () => {
       const res = await request(app)
-        .get("/api?op=m_inquiry&angCode=123456")
-        .set("x-user-finger", userFinger);
+        .get("/api?op=m_inquiry&angCode=123456");
 
       expect(res.statusCode).toBe(200);
       expect(res.body.success).toBe(true);
@@ -142,40 +133,40 @@ describe("Gold Inquiry & Rayg API Test Suite", () => {
       expect(res.body.data.length).toBeGreaterThan(0);
     });
 
-    it("GET /api?op=m_history - should return user inquiry history", async () => {
+    it("GET /api?op=m_history - should return user inquiry history when authenticated", async () => {
       const res = await request(app)
         .get("/api?op=m_history")
-        .set("x-user-finger", userFinger);
+        .set("Authorization", `Bearer ${authToken}`);
 
       expect(res.statusCode).toBe(200);
       expect(res.body.success).toBe(true);
       expect(Array.isArray(res.body.data)).toBe(true);
     });
 
-    it("POST /api?op=m_add_bookmark - should add bookmark code", async () => {
+    it("POST /api?op=m_add_bookmark - should add bookmark code when authenticated", async () => {
       const res = await request(app)
         .post("/api?op=m_add_bookmark")
-        .set("x-user-finger", userFinger)
+        .set("Authorization", `Bearer ${authToken}`)
         .send({ code: "123456", note: "تست بوکمارک" });
 
       expect(res.statusCode).toBe(200);
       expect(res.body.success).toBe(true);
     });
 
-    it("GET /api?op=m_bookmarks - should return user bookmarks", async () => {
+    it("GET /api?op=m_bookmarks - should return user bookmarks when authenticated", async () => {
       const res = await request(app)
         .get("/api?op=m_bookmarks")
-        .set("x-user-finger", userFinger);
+        .set("Authorization", `Bearer ${authToken}`);
 
       expect(res.statusCode).toBe(200);
       expect(res.body.success).toBe(true);
       expect(Array.isArray(res.body.data)).toBe(true);
     });
 
-    it("POST /api?op=m_remove_bookmark - should remove bookmark", async () => {
+    it("POST /api?op=m_remove_bookmark - should remove bookmark when authenticated", async () => {
       const res = await request(app)
         .post("/api?op=m_remove_bookmark")
-        .set("x-user-finger", userFinger)
+        .set("Authorization", `Bearer ${authToken}`)
         .send({ code: "123456" });
 
       expect(res.statusCode).toBe(200);
@@ -184,10 +175,10 @@ describe("Gold Inquiry & Rayg API Test Suite", () => {
   });
 
   describe("4. Laboratory & Orders Management APIs", () => {
-    it("GET /api?op=m_orders - should return list of orders", async () => {
+    it("GET /api?op=m_orders - should return list of orders when authenticated", async () => {
       const res = await request(app)
         .get("/api?op=m_orders")
-        .set("x-user-finger", userFinger);
+        .set("Authorization", `Bearer ${authToken}`);
 
       expect(res.statusCode).toBe(200);
       expect(res.body.success).toBe(true);
@@ -197,7 +188,7 @@ describe("Gold Inquiry & Rayg API Test Suite", () => {
     it("POST /api?op=m_assign_ang - should register ang code for order and sync report", async () => {
       const res = await request(app)
         .post("/api?op=m_assign_ang")
-        .set("x-user-finger", userFinger)
+        .set("Authorization", `Bearer ${authToken}`)
         .send({
           orderId: "ORD-TEST-101",
           stampCode: "Ab998877",
@@ -213,7 +204,7 @@ describe("Gold Inquiry & Rayg API Test Suite", () => {
     it("POST /api?op=m_deliver_order - should deliver order with stampCode", async () => {
       const res = await request(app)
         .post("/api?op=m_deliver_order")
-        .set("x-user-finger", userFinger)
+        .set("Authorization", `Bearer ${authToken}`)
         .send({
           orderId: "ORD-TEST-101",
           stampCode: "Ab998877",
@@ -226,16 +217,20 @@ describe("Gold Inquiry & Rayg API Test Suite", () => {
       expect(res.body.data.status).toBe("delivered");
     });
 
-    it("GET /api?op=m_labs - should list registered assay labs", async () => {
-      const res = await request(app).get("/api?op=m_labs");
+    it("GET /api?op=m_labs - should list registered assay labs when authenticated", async () => {
+      const res = await request(app)
+        .get("/api?op=m_labs")
+        .set("Authorization", `Bearer ${authToken}`);
 
       expect(res.statusCode).toBe(200);
       expect(res.body.success).toBe(true);
       expect(Array.isArray(res.body.data)).toBe(true);
     });
 
-    it("GET /api?op=m_notifications - should return notifications", async () => {
-      const res = await request(app).get("/api?op=m_notifications");
+    it("GET /api?op=m_notifications - should return notifications when authenticated", async () => {
+      const res = await request(app)
+        .get("/api?op=m_notifications")
+        .set("Authorization", `Bearer ${authToken}`);
 
       expect(res.statusCode).toBe(200);
       expect(res.body.success).toBe(true);
@@ -244,9 +239,10 @@ describe("Gold Inquiry & Rayg API Test Suite", () => {
   });
 
   describe("5. Requests & Submissions APIs", () => {
-    it("POST /api?op=m_submit_project - should create project request", async () => {
+    it("POST /api?op=m_submit_project - should create project request when authenticated", async () => {
       const res = await request(app)
         .post("/api?op=m_submit_project")
+        .set("Authorization", `Bearer ${authToken}`)
         .send({
           title: "پروژه ساخت قطعه طلا",
           description: "درخواست ری‌گیری و ساخت",
@@ -257,9 +253,10 @@ describe("Gold Inquiry & Rayg API Test Suite", () => {
       expect(res.body.success).toBe(true);
     });
 
-    it("POST /api?op=m_submit_rental - should create equipment rental request", async () => {
+    it("POST /api?op=m_submit_rental - should create equipment rental request when authenticated", async () => {
       const res = await request(app)
         .post("/api?op=m_submit_rental")
+        .set("Authorization", `Bearer ${authToken}`)
         .send({
           equipment: "دستگاه ری‌گیری XRF",
           duration: "3 days",

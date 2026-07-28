@@ -141,7 +141,7 @@ app.use((err, req, res, next) => {
 const PORT = process.env.PORT || 3000;
 const HOST = '0.0.0.0';
 
-if (require.main === module || process.env.NODE_ENV !== 'test') {
+if (require.main === module) {
   // HTTP Server
   app.listen(PORT, HOST, () => {
     console.log(`HTTP Server running on http://${HOST}:${PORT}`);
