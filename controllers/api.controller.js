@@ -160,7 +160,7 @@ exports.handleOperation = async (req, res) => {
               name: `کاربر ${mobile.slice(-4)}`,
               role: "customer",
             });
-          } else if (!dbUser.finger || dbUser.finger === "guest_finger") {
+          } else {
             dbUser.finger = reqFinger;
             await dbUser.save();
           }
@@ -223,9 +223,7 @@ exports.handleOperation = async (req, res) => {
               role: "customer",
             });
           } else {
-            if (!targetUser.finger || targetUser.finger === "guest_finger") {
-              targetUser.finger = activeFinger;
-            }
+            targetUser.finger = activeFinger;
             await targetUser.save();
           }
         }
