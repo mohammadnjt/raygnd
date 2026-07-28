@@ -118,7 +118,15 @@ exports.handleOperation = async (req, res) => {
         .json({ success: false, message: "پارامتر op ارسال نشده است" });
     }
 
-    const publicOps = ["m_version", "m_login", "m_verify", "m_inquiry"];
+    const publicOps = [
+      "m_version",
+      "m_login",
+      "m_verify",
+      "m_inquiry",
+      "m_labs",
+      "m_top_labs",
+      "m_home_banners",
+    ];
     const isPublicOp = publicOps.includes(op);
 
     const auth = await resolveUser(req);
