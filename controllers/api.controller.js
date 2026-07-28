@@ -57,24 +57,32 @@ async function resolveUser(req) {
     );
 
     let user = req.user || null;
-    const isDbConnected = mongoose.connection.readyState === 1;
 
     if (!user && decoded) {
-      if (decoded.userId && isDbConnected) {
-        if (mongoose.Types.ObjectId.isValid(decoded.userId)) {
+      if (decoded.userId && mongoose.Types.ObjectId.isValid(decoded.userId)) {
+        try {
+          user = await User.findById(decoded.userId);
+        } catch (e) {}
+      }
+      if (!user && decoded.mobile) {
+        const cleanMob = String(decoded.mobile).trim();
+        try {
+          user = await User.findOne({ mobile: cleanMob });
+        } catch (e) {}
+        if (!user) {
           try {
-            user = await User.findById(decoded.userId);
+            user = await User.findOne({
+              mobile: { $regex: new RegExp(`^${cleanMob}$`, "i") },
+            });
           } catch (e) {}
         }
-      }
-      if (!user && decoded.mobile && isDbConnected) {
-        try {
-          user = await User.findOne({ mobile: decoded.mobile });
-        } catch (e) {}
       }
     }
 
     if (!user && decoded) {
+      console.warn(
+        `[resolveUser] DB User not found for decoded token (userId: ${decoded.userId}, mobile: ${decoded.mobile}). Mongo ReadyState: ${mongoose.connection.readyState}`
+      );
       const mob = decoded.mobile || "09123456789";
       user = {
         _id: decoded.userId || "temp_id",
@@ -85,10 +93,15 @@ async function resolveUser(req) {
         fname: "کاربر",
         lname: mob.slice(-4),
       };
+    } else if (user) {
+      console.log(
+        `[resolveUser] Real DB user matched: ${user.name} (${user.mobile}), ID: ${user._id}`
+      );
     }
 
     return { user, token, decoded, error: null };
   } catch (err) {
+    console.error(`[resolveUser] JWT verify failed: ${err.message}`);
     return { user: null, token, error: "توکن معتبر نیست یا منقضی شده است" };
   }
 }
@@ -211,15 +224,23 @@ exports.handleOperation = async (req, res) => {
         }
 
         let targetUser = null;
-        if (isDbConnected) {
-          targetUser = await User.findOne({ mobile });
+        try {
+          const cleanMobile = String(mobile).trim();
+          targetUser = await User.findOne({ mobile: cleanMobile });
+          if (!targetUser) {
+            targetUser = await User.findOne({
+              mobile: { $regex: new RegExp(`^${cleanMobile}$`, "i") },
+            });
+          }
           if (!targetUser) {
             targetUser = await User.create({
-              mobile,
-              name: `کاربر ${mobile.slice(-4)}`,
+              mobile: cleanMobile,
+              name: `کاربر ${cleanMobile.slice(-4)}`,
               role: "customer",
             });
           }
+        } catch (e) {
+          console.warn("[m_verify] Mongo query/create error:", e.message);
         }
 
         const userId = targetUser ? targetUser._id : `user_${mobile}`;
@@ -254,9 +275,13 @@ exports.handleOperation = async (req, res) => {
 
       case "m_profile": {
         let targetUser = user;
+        console.log(
+          `[m_profile] Target user lookup result:`,
+          targetUser ? { id: targetUser._id, name: targetUser.name, mobile: targetUser.mobile } : "null"
+        );
 
         if (params.fname || params.lname || params.name || params.email || params.address || params.city) {
-          if (isDbConnected && targetUser && targetUser._id) {
+          if (targetUser && typeof targetUser.save === "function") {
             targetUser.fname = params.fname || targetUser.fname;
             targetUser.lname = params.lname || targetUser.lname;
             targetUser.name = params.name || `${targetUser.fname} ${targetUser.lname}`.trim();
@@ -264,6 +289,7 @@ exports.handleOperation = async (req, res) => {
             targetUser.address = params.address || targetUser.address;
             targetUser.city = params.city || targetUser.city;
             await targetUser.save();
+            console.log(`[m_profile] Profile updated and saved in DB for user ${targetUser._id}`);
           } else if (targetUser) {
             targetUser.fname = params.fname || targetUser.fname;
             targetUser.lname = params.lname || targetUser.lname;
@@ -280,6 +306,7 @@ exports.handleOperation = async (req, res) => {
           });
         }
 
+        console.log(`[m_profile] Returning profile response data:`, JSON.stringify(targetUser));
         return res.json({
           success: true,
           data: targetUser,
