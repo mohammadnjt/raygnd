@@ -90,10 +90,13 @@ exports.handleOperation = async (req, res) => {
           if (!dbUser) {
             dbUser = await User.create({
               mobile,
-              finger,
-              name: "کاربر جدید",
+              finger: finger !== "guest_finger" ? finger : undefined,
+              name: `کاربر ${mobile.slice(-4)}`,
               role: "customer",
             });
+          } else if (finger && finger !== "guest_finger") {
+            dbUser.finger = finger;
+            await dbUser.save();
           }
         }
 
@@ -106,10 +109,11 @@ exports.handleOperation = async (req, res) => {
           message: "کد تایید برای شما ارسال شد",
           code: 12345,
           user: dbUser || {
-            id: 1,
+            id: Date.now(),
             mobile,
             fname: "کاربر",
-            lname: "تست",
+            lname: mobile.slice(-4),
+            name: `کاربر ${mobile.slice(-4)}`,
             role: "customer",
           },
         });
@@ -124,69 +128,104 @@ exports.handleOperation = async (req, res) => {
           });
         }
 
+        const mobile = params.username || params.mob || params.mobile;
         const activeFinger = params.finger || finger || `finger_${Date.now()}`;
-        let token = "";
+        let targetUser = user;
 
-        if (user) {
+        if (isDbConnected) {
+          if (!targetUser && mobile) {
+            targetUser = await User.findOne({ mobile });
+          }
+          if (!targetUser && activeFinger && activeFinger !== "guest_finger") {
+            targetUser = await User.findOne({ finger: activeFinger });
+          }
+          if (!targetUser && mobile) {
+            targetUser = await User.create({
+              mobile,
+              finger: activeFinger,
+              name: `کاربر ${mobile.slice(-4)}`,
+              role: "customer",
+            });
+          } else if (targetUser && activeFinger && activeFinger !== "guest_finger") {
+            targetUser.finger = activeFinger;
+            await targetUser.save();
+          }
+        }
+
+        let token = "";
+        if (targetUser) {
           token = jwt.sign(
-            { userId: user._id, role: user.role },
+            { userId: targetUser._id, role: targetUser.role },
             process.env.JWT_SECRET || "your-secret-key",
             { expiresIn: "30d" }
           );
         }
+
+        const fallbackUser = {
+          id: Date.now(),
+          mobile: mobile || "09123456789",
+          fname: "کاربر",
+          lname: (mobile || "09123456789").slice(-4),
+          name: `کاربر ${(mobile || "09123456789").slice(-4)}`,
+          role: "customer",
+        };
 
         return res.json({
           finger: activeFinger,
           token,
           success: true,
           message: "ورود موفقیت‌آمیز",
-          user: user || {
-            id: 1,
-            mobile: "09123456789",
-            fname: "محمد",
-            lname: "رضایی",
-            role: "customer",
-          },
+          user: targetUser || fallbackUser,
         });
       }
 
       case "m_profile": {
-        if (params.fname || params.lname || params.name || params.email) {
-          if (isDbConnected && user) {
-            user.fname = params.fname || user.fname;
-            user.lname = params.lname || user.lname;
-            user.name = params.name || `${user.fname} ${user.lname}`.trim();
-            user.email = params.email || user.email;
-            user.address = params.address || user.address;
-            user.city = params.city || user.city;
-            await user.save();
+        let targetUser = user;
+        const mobile = params.username || params.mob || params.mobile;
+
+        if (isDbConnected && !targetUser) {
+          if (mobile) {
+            targetUser = await User.findOne({ mobile });
+          } else if (finger && finger !== "guest_finger") {
+            targetUser = await User.findOne({ finger });
+          }
+        }
+
+        if (params.fname || params.lname || params.name || params.email || params.address || params.city) {
+          if (isDbConnected && targetUser) {
+            targetUser.fname = params.fname || targetUser.fname;
+            targetUser.lname = params.lname || targetUser.lname;
+            targetUser.name = params.name || `${targetUser.fname} ${targetUser.lname}`.trim();
+            targetUser.email = params.email || targetUser.email;
+            targetUser.address = params.address || targetUser.address;
+            targetUser.city = params.city || targetUser.city;
+            await targetUser.save();
 
             return res.json({
               success: true,
               message: "پروفایل با موفقیت بروزرسانی شد",
-              data: user,
+              data: targetUser,
             });
           }
         }
 
-        if (isDbConnected && user) {
-          return res.json({ success: true, data: user });
+        if (targetUser) {
+          return res.json({ success: true, data: targetUser });
         }
 
         return res.json({
           success: true,
           data: {
-            id: 1,
-            name: "محمد رضایی",
-            fname: "محمد",
-            lname: "رضایی",
-            email: "mohammad.rezaei@example.com",
-            phone: "09123456789",
-            mobile: "09123456789",
-            address: "مشهد، خیابان امام رضا، پلاک ۱۲",
-            nationalCode: "1234567890",
+            id: Date.now(),
+            name: params.name || (mobile ? `کاربر ${mobile.slice(-4)}` : "کاربر عمومی"),
+            fname: params.fname || "کاربر",
+            lname: params.lname || (mobile ? mobile.slice(-4) : "عمومی"),
+            email: params.email || "",
+            phone: mobile || "09123456789",
+            mobile: mobile || "09123456789",
+            address: params.address || "",
             role: "customer",
-            city: "مشهد",
+            city: params.city || "",
             avatar: "",
           },
         });
@@ -385,8 +424,9 @@ exports.handleOperation = async (req, res) => {
       }
 
       // ═══════════════════════════════════════════════════════════
-      // 4. Inquiry History (m_inquiry_history)
+      // 4. Inquiry History (m_inquiry_history, m_history)
       // ═══════════════════════════════════════════════════════════
+      case "m_history":
       case "m_inquiry_history": {
         if (isDbConnected) {
           try {
@@ -695,24 +735,59 @@ exports.handleOperation = async (req, res) => {
 
       case "m_deliver_order": {
         const orderId = params.orderId;
+        const stampCode = params.stampCode || params.angCode || "Ab115000";
+        const purity = Number(params.purity) || 750;
+        const deliveredWeight = Number(params.deliveredWeight) || 140;
+
         if (isDbConnected && orderId) {
           try {
-            await Order.findOneAndUpdate(
+            const updatedOrder = await Order.findOneAndUpdate(
               { orderId },
               {
                 status: "delivered",
                 deliveryType: params.deliveryType || "final",
-                stampCode: params.stampCode || "Ab115000",
-                deliveredWeight: Number(params.deliveredWeight) || 140,
-                purity: Number(params.purity) || 750,
-              }
+                stampCode,
+                deliveredWeight,
+                purity,
+              },
+              { new: true }
             );
-          } catch (e) {}
+
+            // Sync into Report model for immediate inquiry availability
+            if (stampCode) {
+              const labName = updatedOrder?.labName || user?.labName || "آزمایشگاه پوربرات";
+              const customerName = updatedOrder?.sellerName || "گالری طلا";
+
+              await Report.findOneAndUpdate(
+                { code: stampCode },
+                {
+                  code: stampCode,
+                  htmlData: [
+                    {
+                      center: labName,
+                      customer: customerName,
+                      result: String(purity),
+                      receipt: stampCode,
+                    },
+                  ],
+                  docText: `ثبت شده توسط آزمایشگاه ${labName}`,
+                  lastSearchedBy: finger,
+                },
+                { upsert: true, new: true }
+              );
+
+              try {
+                await redis.del(`report:${stampCode}`);
+              } catch (e) {}
+            }
+          } catch (e) {
+            console.warn("[m_deliver_order] Error updating order/report:", e.message);
+          }
         }
         return res.json({
           success: true,
-          message: "طلا با موفقیت تحویل داده شد",
-          data: { id: orderId || "ORD-1001", status: "delivered" },
+          message: "طلا با موفقیت تحویل داده شد و کد انگ در دیتابیس ثبت گردید",
+          data: { id: orderId || "ORD-1001", status: "delivered", stampCode, purity },
         });
       }
 
@@ -746,21 +821,60 @@ exports.handleOperation = async (req, res) => {
         });
       }
 
-      case "m_assign_ang": {
-        if (isDbConnected && params.orderId) {
+      case "m_assign_ang":
+      case "m_add_report":
+      case "m_add_ang": {
+        const stampCode = params.stampCode || params.angCode || params.code || "Ab115001";
+        const orderId = params.orderId;
+        const purityVal = params.purity || params.result || "۷۵۰";
+        const labName = params.labName || user?.labName || "آزمایشگاه پوربرات";
+        const customerName = params.customer || params.sellerName || "گالری طلا";
+
+        if (isDbConnected) {
           try {
-            await Order.findOneAndUpdate(
-              { orderId: params.orderId },
-              { stampCode: params.stampCode || "Ab115001" }
+            if (orderId) {
+              await Order.findOneAndUpdate(
+                { orderId },
+                { stampCode, purity: Number(purityVal) || 750 }
+              );
+            }
+
+            // Save/Upsert directly to Report model
+            await Report.findOneAndUpdate(
+              { code: stampCode },
+              {
+                code: stampCode,
+                htmlData: [
+                  {
+                    center: labName,
+                    customer: customerName,
+                    result: String(purityVal),
+                    receipt: stampCode,
+                  },
+                ],
+                docText: `ثبت شده توسط ${labName}`,
+                lastSearchedBy: finger,
+              },
+              { upsert: true, new: true }
             );
-          } catch (e) {}
+
+            try {
+              await redis.del(`report:${stampCode}`);
+            } catch (e) {}
+            console.log("[m_assign_ang/m_add_report] Synced angCode to MongoDB Report:", stampCode);
+          } catch (e) {
+            console.warn("[m_assign_ang] Error syncing report:", e.message);
+          }
         }
+
         return res.json({
           success: true,
-          message: "کد انگ با موفقیت ثبت شد",
+          message: "کد انگ با موفقیت در دیتابیس آزمایشگاه ثبت و ایندکس شد",
           data: {
-            id: params.orderId || "ORD-1001",
-            stampCode: params.stampCode || "Ab115001",
+            id: orderId || "ORD-1001",
+            stampCode,
+            purity: purityVal,
+            labName,
           },
         });
       }

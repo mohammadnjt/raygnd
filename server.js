@@ -141,23 +141,25 @@ app.use((err, req, res, next) => {
 const PORT = process.env.PORT || 3000;
 const HOST = '0.0.0.0';
 
-// HTTP Server
-app.listen(PORT, HOST, () => {
-  console.log(`HTTP Server running on http://${HOST}:${PORT}`);
-});
-
-// HTTPS Server with SSL (if ssl certs are available)
-const sslKeyPath = '/etc/letsencrypt/live/mozafar.gold/privkey.pem';
-const sslCertPath = '/etc/letsencrypt/live/mozafar.gold/fullchain.pem';
-if (process.env.ENABLE_HTTPS === 'true' && fs.existsSync(sslKeyPath) && fs.existsSync(sslCertPath)) {
-  const HTTPS_PORT = process.env.HTTPS_PORT || 3051;
-  https.createServer({
-    key: fs.readFileSync(sslKeyPath),
-    cert: fs.readFileSync(sslCertPath),
-  }, app).listen(HTTPS_PORT, (err) => {
-    if (err) console.log(err);
-    else console.log(`HTTPS Server running on port ${HTTPS_PORT}`);
+if (require.main === module || process.env.NODE_ENV !== 'test') {
+  // HTTP Server
+  app.listen(PORT, HOST, () => {
+    console.log(`HTTP Server running on http://${HOST}:${PORT}`);
   });
+
+  // HTTPS Server with SSL (if ssl certs are available)
+  const sslKeyPath = '/etc/letsencrypt/live/mozafar.gold/privkey.pem';
+  const sslCertPath = '/etc/letsencrypt/live/mozafar.gold/fullchain.pem';
+  if (process.env.ENABLE_HTTPS === 'true' && fs.existsSync(sslKeyPath) && fs.existsSync(sslCertPath)) {
+    const HTTPS_PORT = process.env.HTTPS_PORT || 3051;
+    https.createServer({
+      key: fs.readFileSync(sslKeyPath),
+      cert: fs.readFileSync(sslCertPath),
+    }, app).listen(HTTPS_PORT, (err) => {
+      if (err) console.log(err);
+      else console.log(`HTTPS Server running on port ${HTTPS_PORT}`);
+    });
+  }
 }
 
 module.exports = app;
