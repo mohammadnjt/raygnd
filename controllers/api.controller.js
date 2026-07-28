@@ -121,19 +121,7 @@ async function resolveUser(req) {
       console.warn(
         `[resolveUser] DB User not found for decoded token (userId: ${decoded.userId}, mobile: ${decoded.mobile}). Mongo ReadyState: ${mongoose.connection.readyState}`
       );
-      const mob = decoded.mobile || "09123456789";
-      const cleanMob = String(mob).trim();
-      const defaultRole = decoded.role || (cleanMob === "09121112233" ? "superAdmin" : "customer");
-
-      user = {
-        _id: decoded.userId || "temp_id",
-        id: decoded.userId || Date.now(),
-        mobile: mob,
-        role: defaultRole,
-        name: `کاربر ${mob.slice(-4)}`,
-        fname: "کاربر",
-        lname: mob.slice(-4),
-      };
+      return { user: null, token, decoded, error: "کاربر یافت نشد" };
     } else if (user) {
       console.log(
         `[resolveUser] Real DB user matched: ${user.name} (${user.mobile}), ID: ${user._id}`
@@ -184,7 +172,7 @@ exports.handleOperation = async (req, res) => {
       });
     }
 
-    const isDbConnected = mongoose.connection.readyState === 1;
+    const isDbConnected = mongoose.connection.readyState === 1 || mongoose.connection.readyState === 2;
 
     switch (op) {
       // ═══════════════════════════════════════════════════════════
@@ -1236,14 +1224,25 @@ exports.handleOperation = async (req, res) => {
           try {
             const query = {};
 
+            if (user && user._id) {
+              const mongoose = require("mongoose");
+              if (mongoose.Types.ObjectId.isValid(user._id.toString())) {
+                query._id = { $ne: user._id };
+              }
+            }
+
             if (roleFilter && roleFilter !== "all") {
               query.role = roleFilter;
             }
 
             if (statusFilter && statusFilter !== "all") {
-              if (statusFilter === "active") query.isActive = true;
-              else if (statusFilter === "inactive") query.isActive = false;
-              else query.status = statusFilter;
+              if (statusFilter === "active") {
+                query.isActive = { $ne: false };
+              } else if (statusFilter === "inactive") {
+                query.isActive = false;
+              } else {
+                query.status = statusFilter;
+              }
             }
 
             if (search) {
@@ -1259,6 +1258,8 @@ exports.handleOperation = async (req, res) => {
                 { address: regex },
               ];
             }
+
+            console.log("[m_admin_users] Final DB Query:", JSON.stringify(query));
 
             totalUsers = await User.countDocuments(query);
             const rawUsers = await User.find(query)
@@ -1646,6 +1647,13 @@ exports.handleOperation = async (req, res) => {
       case "m_admin_tickets":
       case "m_user_tickets":
       case "m_support_tickets": {
+        if (op === "m_admin_tickets" && (!user || (user.role !== "superAdmin" && user.role !== "admin"))) {
+          return res.status(401).json({
+            success: false,
+            message: "دسترسی غیرمجاز. فقط کاربران با نقش سوپر ادمین به این بخش دسترسی دارند.",
+          });
+        }
+
         const page = Math.max(1, parseInt(params.page) || 1);
         const limit = Math.max(1, parseInt(params.limit) || 10);
         const skip = (page - 1) * limit;
