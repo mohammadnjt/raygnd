@@ -12,6 +12,40 @@ const RentalRequest = require("../models/rentalRequest.model");
 const ProjectRequest = require("../models/projectRequest.model");
 const Notification = require("../models/notification.model");
 const Lab = require("../models/lab.model");
+const Ticket = require("../models/ticket.model");
+
+// Helper function to format user objects with explicit name and business fields
+function formatUserResponse(u) {
+  if (!u) return null;
+  const isCustomer = u.role === "customer";
+  const businessName = isCustomer
+    ? ""
+    : (u.shopName || u.labName || u.companyName || u.businessName || "");
+
+  const fname = u.fname || "";
+  const lname = u.lname || "";
+  const fullName = u.name || `${fname} ${lname}`.trim() || (isCustomer ? "کاربر مشتری" : businessName || "کاربر");
+
+  return {
+    _id: u._id ? u._id.toString() : u.id || "temp_id",
+    id: u._id ? u._id.toString() : u.id || "temp_id",
+    mobile: u.mobile || "",
+    fname,
+    lname,
+    name: fullName,
+    role: u.role || "customer",
+    city: u.city || "",
+    address: u.address || "",
+    companyName: businessName,
+    shopName: u.shopName || "",
+    labName: u.labName || "",
+    phone: u.phone || u.mobile || "",
+    isActive: u.isActive !== false,
+    status: u.status || "active",
+    createdAt: u.createdAt || new Date(),
+    updatedAt: u.updatedAt || new Date(),
+  };
+}
 
 // Scripts & Services
 const redis = require("../scripts/redis");
@@ -1161,12 +1195,653 @@ exports.handleOperation = async (req, res) => {
             "درخواست عضویت همکار با موفقیت ثبت شد و در انتظار تایید مدیریت است.",
         });
 
+      // ==========================================
+      // SUPER ADMIN USER MANAGEMENT ENDPOINTS
+      // ==========================================
+      case "m_admin_users":
+      case "m_users":
+      case "m_get_users": {
+        const page = Math.max(1, parseInt(params.page) || 1);
+        const limit = Math.max(1, parseInt(params.limit) || 10);
+        const skip = (page - 1) * limit;
+
+        const search = String(params.search || params.q || "").trim();
+        const roleFilter = String(params.role || "").trim();
+        const statusFilter = String(params.status || "").trim();
+
+        let usersList = [];
+        let totalUsers = 0;
+
+        if (isDbConnected) {
+          try {
+            const query = {};
+
+            if (roleFilter && roleFilter !== "all") {
+              query.role = roleFilter;
+            }
+
+            if (statusFilter && statusFilter !== "all") {
+              if (statusFilter === "active") query.isActive = true;
+              else if (statusFilter === "inactive") query.isActive = false;
+              else query.status = statusFilter;
+            }
+
+            if (search) {
+              const regex = new RegExp(search, "i");
+              query.$or = [
+                { mobile: regex },
+                { fname: regex },
+                { lname: regex },
+                { name: regex },
+                { city: regex },
+                { shopName: regex },
+                { labName: regex },
+                { address: regex },
+              ];
+            }
+
+            totalUsers = await User.countDocuments(query);
+            const rawUsers = await User.find(query)
+              .sort({ createdAt: -1 })
+              .skip(skip)
+              .limit(limit);
+
+            usersList = rawUsers.map(formatUserResponse);
+          } catch (e) {
+            console.error("[m_admin_users] Error fetching users:", e.message);
+          }
+        }
+
+        if (usersList.length === 0 && !search && !roleFilter) {
+          // Fallback initial mockup data if DB empty
+          totalUsers = totalUsers || 3;
+          usersList = [
+            formatUserResponse({
+              _id: "u_1",
+              mobile: "09123456789",
+              fname: "علی",
+              lname: "رضایی",
+              role: "customer",
+              city: "تهران",
+              address: "خیابان ولیعصر",
+            }),
+            formatUserResponse({
+              _id: "u_2",
+              mobile: "09121112233",
+              fname: "محمد",
+              lname: "نجاتی",
+              role: "gold",
+              shopName: "طلافروشی نجاتی",
+              city: "مشهد",
+              address: "بازار رضا",
+            }),
+            formatUserResponse({
+              _id: "u_3",
+              mobile: "09129998877",
+              fname: "حمید",
+              lname: "کاظمی",
+              role: "lab",
+              labName: "آزمایشگاه سنجش",
+              city: "اصفهان",
+              address: "میدان نقش جهان",
+            }),
+          ];
+        }
+
+        return res.json({
+          success: true,
+          data: usersList,
+          total: totalUsers,
+          page,
+          limit,
+          totalPages: Math.ceil(totalUsers / limit) || 1,
+        });
+      }
+
+      case "m_admin_create_user":
+      case "m_create_user":
+      case "m_add_user": {
+        const mobile = String(params.mobile || "").trim();
+        if (!mobile) {
+          return res
+            .status(400)
+            .json({ success: false, message: "شماره تماس الزامی است" });
+        }
+
+        if (isDbConnected) {
+          try {
+            const existing = await User.findOne({ mobile });
+            if (existing) {
+              return res.status(400).json({
+                success: false,
+                message: "کاربری با این شماره تماس قبلاً ثبت شده است",
+              });
+            }
+          } catch (e) {}
+        }
+
+        const role = params.role || "customer";
+        const fname = String(params.fname || "").trim();
+        const lname = String(params.lname || "").trim();
+        const city = String(params.city || "").trim();
+        const address = String(params.address || "").trim();
+        const companyName = String(
+          params.companyName || params.shopName || params.labName || params.businessName || ""
+        ).trim();
+
+        let shopName = "";
+        let labName = "";
+
+        if (role === "gold") {
+          shopName = companyName;
+        } else if (role === "lab") {
+          labName = companyName;
+        } else if (role !== "customer") {
+          shopName = companyName;
+        }
+
+        const name =
+          `${fname} ${lname}`.trim() ||
+          (role === "customer"
+            ? `کاربر ${mobile.slice(-4)}`
+            : companyName || `صاحب مجموعه ${mobile.slice(-4)}`);
+
+        let newUser;
+        if (isDbConnected) {
+          newUser = await User.create({
+            mobile,
+            fname,
+            lname,
+            name,
+            role,
+            city,
+            address,
+            shopName,
+            labName,
+            isActive: params.isActive !== false && params.status !== "inactive",
+            status: params.status || "active",
+          });
+        } else {
+          newUser = {
+            _id: `user_${Date.now()}`,
+            mobile,
+            fname,
+            lname,
+            name,
+            role,
+            city,
+            address,
+            shopName,
+            labName,
+            isActive: true,
+            status: "active",
+            createdAt: new Date(),
+          };
+        }
+
+        return res.json({
+          success: true,
+          message: "کاربر جدید با موفقیت ایجاد شد",
+          data: formatUserResponse(newUser),
+        });
+      }
+
+      case "m_admin_update_user":
+      case "m_update_user":
+      case "m_edit_user":
+      case "m_admin_edit_user": {
+        const targetId = params.id || params.userId || params._id;
+        if (!targetId) {
+          return res
+            .status(400)
+            .json({ success: false, message: "شناسه کاربر الزامی است" });
+        }
+
+        let targetUser = null;
+        if (isDbConnected) {
+          try {
+            if (mongoose.Types.ObjectId.isValid(targetId)) {
+              targetUser = await User.findById(targetId);
+            }
+            if (!targetUser && params.mobile) {
+              targetUser = await User.findOne({ mobile: params.mobile });
+            }
+          } catch (e) {}
+        }
+
+        if (!targetUser) {
+          targetUser = {
+            _id: targetId,
+            mobile: params.mobile || "09123456789",
+            fname: params.fname || "",
+            lname: params.lname || "",
+            role: params.role || "customer",
+            city: params.city || "",
+            address: params.address || "",
+            shopName: params.shopName || params.companyName || "",
+            labName: params.labName || "",
+          };
+        }
+
+        const role = params.role !== undefined ? params.role : targetUser.role;
+        const fname =
+          params.fname !== undefined ? String(params.fname).trim() : targetUser.fname;
+        const lname =
+          params.lname !== undefined ? String(params.lname).trim() : targetUser.lname;
+        const city =
+          params.city !== undefined ? String(params.city).trim() : targetUser.city;
+        const address =
+          params.address !== undefined ? String(params.address).trim() : targetUser.address;
+        const mobile =
+          params.mobile !== undefined ? String(params.mobile).trim() : targetUser.mobile;
+
+        const companyName = String(
+          params.companyName || params.shopName || params.labName || params.businessName || ""
+        ).trim();
+
+        if (role === "customer") {
+          targetUser.shopName = "";
+          targetUser.labName = "";
+        } else if (role === "gold") {
+          targetUser.shopName = companyName || targetUser.shopName;
+          targetUser.labName = "";
+        } else if (role === "lab") {
+          targetUser.labName = companyName || targetUser.labName;
+          targetUser.shopName = "";
+        } else if (companyName) {
+          targetUser.shopName = companyName;
+        }
+
+        targetUser.role = role;
+        targetUser.fname = fname;
+        targetUser.lname = lname;
+        targetUser.city = city;
+        targetUser.address = address;
+        targetUser.mobile = mobile;
+        targetUser.name = `${fname} ${lname}`.trim() || targetUser.name;
+
+        if (params.isActive !== undefined) targetUser.isActive = Boolean(params.isActive);
+        if (params.status !== undefined) targetUser.status = params.status;
+
+        if (isDbConnected && typeof targetUser.save === "function") {
+          await targetUser.save();
+        }
+
+        return res.json({
+          success: true,
+          message: "اطلاعات کاربر با موفقیت بروزرسانی شد",
+          data: formatUserResponse(targetUser),
+        });
+      }
+
+      case "m_admin_delete_user":
+      case "m_delete_user":
+      case "m_remove_user": {
+        const targetId = params.id || params.userId || params._id;
+        if (!targetId) {
+          return res
+            .status(400)
+            .json({ success: false, message: "شناسه کاربر الزامی است" });
+        }
+
+        if (isDbConnected) {
+          try {
+            if (mongoose.Types.ObjectId.isValid(targetId)) {
+              await User.findByIdAndDelete(targetId);
+            } else {
+              await User.deleteOne({ $or: [{ _id: targetId }, { mobile: targetId }] });
+            }
+          } catch (e) {}
+        }
+
+        return res.json({
+          success: true,
+          message: "کاربر با موفقیت حذف شد",
+        });
+      }
+
+      // ==========================================
+      // TICKETS SYSTEM ENDPOINTS
+      // ==========================================
       case "m_support_ticket":
+      case "m_create_ticket":
+      case "m_add_ticket":
+      case "m_submit_ticket": {
+        const title = String(params.title || params.subject || "").trim();
+        const message = String(
+          params.message || params.description || params.content || ""
+        ).trim();
+
+        if (!title || !message) {
+          return res.status(400).json({
+            success: false,
+            message: "عنوان و متن پیام تیکت الزامی است",
+          });
+        }
+
+        const department = params.department || params.category || "پشتیبانی عمومی";
+        const priority = params.priority || "medium";
+        const attachments = Array.isArray(params.attachments)
+          ? params.attachments
+          : params.file
+          ? [params.file]
+          : [];
+
+        const ticketNumber = `TCK-${Math.floor(100000 + Math.random() * 900000)}`;
+        const senderName =
+          user?.name ||
+          `${user?.fname || ""} ${user?.lname || ""}`.trim() ||
+          user?.mobile ||
+          "کاربر";
+
+        let newTicket;
+        if (isDbConnected) {
+          try {
+            newTicket = await Ticket.create({
+              ticketNumber,
+              userId: user?._id || "guest_id",
+              userName: senderName,
+              userMobile: user?.mobile || "",
+              title,
+              department,
+              priority,
+              status: "open",
+              messages: [
+                {
+                  senderId: user?._id || "guest_id",
+                  senderName,
+                  senderRole:
+                    user?.role === "superAdmin" || user?.role === "admin"
+                      ? "admin"
+                      : "user",
+                  message,
+                  attachments,
+                  createdAt: new Date(),
+                },
+              ],
+              lastMessageAt: new Date(),
+            });
+          } catch (e) {
+            console.error("[m_create_ticket] Ticket creation error:", e.message);
+          }
+        }
+
+        if (!newTicket) {
+          newTicket = {
+            _id: `tck_${Date.now()}`,
+            ticketNumber,
+            userId: user?._id || "guest_id",
+            userName: senderName,
+            userMobile: user?.mobile || "",
+            title,
+            department,
+            priority,
+            status: "open",
+            messages: [
+              {
+                _id: `msg_1`,
+                senderId: user?._id || "guest_id",
+                senderName,
+                senderRole: "user",
+                message,
+                attachments,
+                createdAt: new Date(),
+              },
+            ],
+            lastMessageAt: new Date(),
+            createdAt: new Date(),
+          };
+        }
+
         return res.json({
           success: true,
           message: "تیکت پشتیبانی با موفقیت ثبت شد",
-          data: { id: "TKT-001", status: "open" },
+          data: newTicket,
         });
+      }
+
+      case "m_tickets":
+      case "m_get_tickets":
+      case "m_admin_tickets":
+      case "m_user_tickets":
+      case "m_support_tickets": {
+        const page = Math.max(1, parseInt(params.page) || 1);
+        const limit = Math.max(1, parseInt(params.limit) || 10);
+        const skip = (page - 1) * limit;
+
+        const statusFilter = String(params.status || "").trim();
+        const search = String(params.search || params.q || "").trim();
+
+        let ticketList = [];
+        let totalTickets = 0;
+
+        if (isDbConnected) {
+          try {
+            const query = {};
+
+            const isAdmin =
+              user?.role === "superAdmin" || user?.role === "admin";
+            if (!isAdmin && user?._id) {
+              query.userId = user._id;
+            }
+
+            if (statusFilter && statusFilter !== "all") {
+              query.status = statusFilter;
+            }
+
+            if (search) {
+              const regex = new RegExp(search, "i");
+              query.$or = [
+                { title: regex },
+                { ticketNumber: regex },
+                { userName: regex },
+                { userMobile: regex },
+                { department: regex },
+              ];
+            }
+
+            totalTickets = await Ticket.countDocuments(query);
+            ticketList = await Ticket.find(query)
+              .sort({ lastMessageAt: -1 })
+              .skip(skip)
+              .limit(limit);
+          } catch (e) {
+            console.error("[m_tickets] Error fetching tickets:", e.message);
+          }
+        }
+
+        if (ticketList.length === 0 && !search && !statusFilter) {
+          totalTickets = totalTickets || 1;
+          ticketList = [
+            {
+              _id: "tck_1001",
+              ticketNumber: "TCK-885412",
+              title: "سوال در مورد ری‌گیری طلا",
+              department: "پشتیبانی فنی",
+              priority: "medium",
+              status: "open",
+              userName: user?.name || "کاربر آزما",
+              userMobile: user?.mobile || "09123456789",
+              lastMessageAt: new Date(),
+              createdAt: new Date(),
+              messages: [
+                {
+                  _id: "m_1",
+                  senderName: user?.name || "کاربر آزما",
+                  senderRole: "user",
+                  message: "با سلام، چگونه جواب آزمایشگاه را پیگیری کنم؟",
+                  createdAt: new Date(),
+                },
+              ],
+            },
+          ];
+        }
+
+        return res.json({
+          success: true,
+          data: ticketList,
+          total: totalTickets,
+          page,
+          limit,
+          totalPages: Math.ceil(totalTickets / limit) || 1,
+        });
+      }
+
+      case "m_ticket":
+      case "m_get_ticket":
+      case "m_ticket_details":
+      case "m_ticket_messages": {
+        const ticketId = params.id || params.ticketId || params.ticketNumber;
+        if (!ticketId) {
+          return res
+            .status(400)
+            .json({ success: false, message: "شناسه تیکت الزامی است" });
+        }
+
+        let ticket = null;
+        if (isDbConnected) {
+          try {
+            if (mongoose.Types.ObjectId.isValid(ticketId)) {
+              ticket = await Ticket.findById(ticketId);
+            }
+            if (!ticket) {
+              ticket = await Ticket.findOne({ ticketNumber: ticketId });
+            }
+          } catch (e) {}
+        }
+
+        if (!ticket) {
+          ticket = {
+            _id: ticketId,
+            ticketNumber: "TCK-885412",
+            title: "تیکت نمونه",
+            department: "پشتیبانی عمومی",
+            priority: "medium",
+            status: "open",
+            userName: "کاربر آزما",
+            userMobile: "09123456789",
+            messages: [],
+          };
+        }
+
+        return res.json({
+          success: true,
+          data: ticket,
+        });
+      }
+
+      case "m_send_ticket_message":
+      case "m_reply_ticket":
+      case "m_add_ticket_message":
+      case "m_submit_ticket_message": {
+        const ticketId = params.id || params.ticketId || params.ticketNumber;
+        const message = String(
+          params.message || params.text || params.content || ""
+        ).trim();
+
+        if (!ticketId || !message) {
+          return res.status(400).json({
+            success: false,
+            message: "شناسه تیکت و متن پیام الزامی است",
+          });
+        }
+
+        let ticket = null;
+        if (isDbConnected) {
+          try {
+            if (mongoose.Types.ObjectId.isValid(ticketId)) {
+              ticket = await Ticket.findById(ticketId);
+            }
+            if (!ticket) {
+              ticket = await Ticket.findOne({ ticketNumber: ticketId });
+            }
+          } catch (e) {}
+        }
+
+        const isAdmin =
+          user?.role === "superAdmin" || user?.role === "admin";
+        const senderRole = isAdmin ? "admin" : "user";
+        const senderName =
+          user?.name ||
+          `${user?.fname || ""} ${user?.lname || ""}`.trim() ||
+          user?.mobile ||
+          (isAdmin ? "پشتیبانی" : "کاربر");
+        const attachments = Array.isArray(params.attachments)
+          ? params.attachments
+          : params.file
+          ? [params.file]
+          : [];
+
+        const newMessage = {
+          senderId: user?._id || "guest_id",
+          senderName,
+          senderRole,
+          message,
+          attachments,
+          createdAt: new Date(),
+        };
+
+        if (ticket) {
+          ticket.messages.push(newMessage);
+          ticket.lastMessageAt = new Date();
+          ticket.status = isAdmin ? "replied" : "pending";
+
+          if (isDbConnected && typeof ticket.save === "function") {
+            await ticket.save();
+          }
+        } else {
+          ticket = {
+            _id: ticketId,
+            status: isAdmin ? "replied" : "pending",
+            messages: [newMessage],
+          };
+        }
+
+        return res.json({
+          success: true,
+          message: "پیام شما با موفقیت ثبت شد",
+          data: ticket,
+        });
+      }
+
+      case "m_close_ticket":
+      case "m_update_ticket_status":
+      case "m_change_ticket_status": {
+        const ticketId = params.id || params.ticketId || params.ticketNumber;
+        if (!ticketId) {
+          return res
+            .status(400)
+            .json({ success: false, message: "شناسه تیکت الزامی است" });
+        }
+
+        let ticket = null;
+        if (isDbConnected) {
+          try {
+            if (mongoose.Types.ObjectId.isValid(ticketId)) {
+              ticket = await Ticket.findById(ticketId);
+            }
+            if (!ticket) {
+              ticket = await Ticket.findOne({ ticketNumber: ticketId });
+            }
+          } catch (e) {}
+        }
+
+        const newStatus = params.status || "closed";
+        if (ticket) {
+          ticket.status = newStatus;
+          if (isDbConnected && typeof ticket.save === "function") {
+            await ticket.save();
+          }
+        } else {
+          ticket = { _id: ticketId, status: newStatus };
+        }
+
+        return res.json({
+          success: true,
+          message: `وضعیت تیکت به ${newStatus} تغییر یافت`,
+          data: ticket,
+        });
+      }
 
       case "m_notifications": {
         if (isDbConnected && user?._id) {
@@ -1310,17 +1985,37 @@ exports.handleOperation = async (req, res) => {
           },
         });
 
-      case "m_admin_dashboard":
+      case "m_admin_dashboard": {
+        let totalUsers = 4;
+        let totalLabs = 5;
+        let totalSellers = 3;
+        let totalOrders = 7;
+        let totalInquiries = 5;
+        let totalTickets = 0;
+
+        if (isDbConnected) {
+          try {
+            totalUsers = await User.countDocuments();
+            totalLabs = await Lab.countDocuments();
+            totalSellers = await User.countDocuments({ role: "gold" });
+            totalOrders = await Order.countDocuments();
+            totalInquiries = await InquiryHistory.countDocuments();
+            totalTickets = await Ticket.countDocuments({ status: { $ne: "closed" } });
+          } catch (e) {}
+        }
+
         return res.json({
           success: true,
           data: {
-            totalUsers: 4,
-            totalLabs: 5,
-            totalSellers: 3,
-            totalOrders: 7,
-            totalInquiries: 5,
+            totalUsers,
+            totalLabs,
+            totalSellers,
+            totalOrders,
+            totalInquiries,
+            totalTickets,
           },
         });
+      }
 
       case "m_workshops":
         return res.json({

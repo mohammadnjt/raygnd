@@ -267,5 +267,130 @@ describe("Gold Inquiry & Rayg API Test Suite", () => {
       expect(res.body.success).toBe(true);
     });
   });
+
+  describe("6. Super Admin User Management & Ticket System APIs", () => {
+    let createdUserId = "";
+    let createdTicketId = "";
+
+    it("GET /api?op=m_admin_users - should return paginated users list", async () => {
+      const res = await request(app)
+        .get("/api?op=m_admin_users&page=1&limit=10")
+        .set("Authorization", `Bearer ${authToken}`);
+
+      expect(res.statusCode).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(Array.isArray(res.body.data)).toBe(true);
+      expect(res.body.total).toBeDefined();
+    });
+
+    it("POST /api?op=m_admin_create_user - should create a new user with role and company name", async () => {
+      const newUserMobile = "09301112233";
+      const res = await request(app)
+        .post("/api?op=m_admin_create_user")
+        .set("Authorization", `Bearer ${authToken}`)
+        .send({
+          mobile: newUserMobile,
+          fname: "احمد",
+          lname: "رضایی",
+          role: "gold",
+          companyName: "طلافروشی رضایی",
+          city: "تهران",
+          address: "بازار بزرگ",
+        });
+
+      expect(res.statusCode).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.data).toBeDefined();
+      expect(res.body.data.mobile).toBe(newUserMobile);
+      expect(res.body.data.companyName).toBe("طلافروشی رضایی");
+      expect(res.body.data.name).toBe("احمد رضایی");
+
+      createdUserId = res.body.data._id || res.body.data.id;
+    });
+
+    it("POST /api?op=m_admin_update_user - should update existing user details", async () => {
+      const res = await request(app)
+        .post("/api?op=m_admin_update_user")
+        .set("Authorization", `Bearer ${authToken}`)
+        .send({
+          id: createdUserId,
+          city: "اصفهان",
+          fname: "احمد رضا",
+        });
+
+      expect(res.statusCode).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.data.city).toBe("اصفهان");
+      expect(res.body.data.fname).toBe("احمد رضا");
+    });
+
+    it("POST /api?op=m_admin_delete_user - should delete user", async () => {
+      const res = await request(app)
+        .post("/api?op=m_admin_delete_user")
+        .set("Authorization", `Bearer ${authToken}`)
+        .send({
+          id: createdUserId,
+        });
+
+      expect(res.statusCode).toBe(200);
+      expect(res.body.success).toBe(true);
+    });
+
+    it("POST /api?op=m_create_ticket - should create a new support ticket", async () => {
+      const res = await request(app)
+        .post("/api?op=m_create_ticket")
+        .set("Authorization", `Bearer ${authToken}`)
+        .send({
+          title: "مشکل در ثبت سفارش",
+          department: "پشتیبانی فنی",
+          priority: "high",
+          message: "سلام، هنگام پرداخت ارور دریافت میکنم.",
+        });
+
+      expect(res.statusCode).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.data).toBeDefined();
+      expect(res.body.data.ticketNumber).toBeDefined();
+
+      createdTicketId = res.body.data._id || res.body.data.ticketNumber;
+    });
+
+    it("GET /api?op=m_tickets - should return tickets list with pagination", async () => {
+      const res = await request(app)
+        .get("/api?op=m_tickets&page=1&limit=10")
+        .set("Authorization", `Bearer ${authToken}`);
+
+      expect(res.statusCode).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(Array.isArray(res.body.data)).toBe(true);
+    });
+
+    it("POST /api?op=m_send_ticket_message - should add a message reply to ticket", async () => {
+      const res = await request(app)
+        .post("/api?op=m_send_ticket_message")
+        .set("Authorization", `Bearer ${authToken}`)
+        .send({
+          ticketId: createdTicketId,
+          message: "پیگیری شد، مشکل مرتفع گردید.",
+        });
+
+      expect(res.statusCode).toBe(200);
+      expect(res.body.success).toBe(true);
+    });
+
+    it("POST /api?op=m_close_ticket - should close ticket", async () => {
+      const res = await request(app)
+        .post("/api?op=m_close_ticket")
+        .set("Authorization", `Bearer ${authToken}`)
+        .send({
+          ticketId: createdTicketId,
+          status: "closed",
+        });
+
+      expect(res.statusCode).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.data.status).toBe("closed");
+    });
+  });
 });
 
