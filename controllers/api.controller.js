@@ -61,10 +61,16 @@ async function resolveUser(req) {
 
     if (!user && decoded) {
       if (decoded.userId && isDbConnected) {
-        user = await User.findById(decoded.userId);
+        if (mongoose.Types.ObjectId.isValid(decoded.userId)) {
+          try {
+            user = await User.findById(decoded.userId);
+          } catch (e) {}
+        }
       }
       if (!user && decoded.mobile && isDbConnected) {
-        user = await User.findOne({ mobile: decoded.mobile });
+        try {
+          user = await User.findOne({ mobile: decoded.mobile });
+        } catch (e) {}
       }
     }
 
