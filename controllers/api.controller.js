@@ -83,6 +83,33 @@ exports.handleOperation = async (req, res) => {
       case "m_login": {
         const mobile =
           params.username || params.mob || params.mobile || "09123456789";
+        const reqFinger = params.finger || finger;
+
+        // Rate limiting check: Max 5 OTP requests per mobile in 2 hours (7200s)
+        const rateKey = `otp_count:${mobile}`;
+        let currentCount = 0;
+
+        try {
+          const countStr = await redis.get(rateKey);
+          currentCount = countStr ? parseInt(countStr, 10) : 0;
+        } catch (e) {}
+
+        if (currentCount >= 5) {
+          return res.status(429).json({
+            success: false,
+            message: "شما بیش از ۵ بار در ۲ ساعت گذشته کد تایید دریافت کرده‌اید. لطفا بعداً تلاش کنید.",
+          });
+        }
+
+        // Increment count and set 2-hour TTL if key is new
+        try {
+          if (currentCount === 0) {
+            await redis.set(rateKey, "1", "EX", 7200);
+          } else {
+            await redis.incr(rateKey);
+          }
+          await redis.set(`otp:${mobile}`, "12345", "EX", 300);
+        } catch (e) {}
 
         let dbUser = null;
         if (isDbConnected) {
@@ -90,19 +117,15 @@ exports.handleOperation = async (req, res) => {
           if (!dbUser) {
             dbUser = await User.create({
               mobile,
-              finger: finger !== "guest_finger" ? finger : undefined,
+              finger: reqFinger && reqFinger !== "guest_finger" ? reqFinger : undefined,
               name: `کاربر ${mobile.slice(-4)}`,
               role: "customer",
             });
-          } else if (finger && finger !== "guest_finger") {
-            dbUser.finger = finger;
+          } else if (reqFinger && reqFinger !== "guest_finger") {
+            dbUser.finger = reqFinger;
             await dbUser.save();
           }
         }
-
-        try {
-          await redis.set(`otp:${mobile}`, "12345", "EX", 300);
-        } catch (e) {}
 
         return res.json({
           success: true,
@@ -121,32 +144,34 @@ exports.handleOperation = async (req, res) => {
 
       case "m_verify": {
         const code = params.code;
-        if (code && code !== "12345" && code !== 12345) {
+        const mobile = params.username || params.mob || params.mobile || "09123456789";
+        const activeFinger = params.finger || req.headers["x-user-finger"] || finger || `finger_${Date.now()}`;
+
+        // Verify OTP from Redis or fallback 12345
+        let validCode = "12345";
+        try {
+          const storedOtp = await redis.get(`otp:${mobile}`);
+          if (storedOtp) validCode = storedOtp;
+        } catch (e) {}
+
+        if (!code || (String(code) !== String(validCode) && String(code) !== "12345")) {
           return res.json({
             success: false,
             message: "کد وارد شده نامعتبر است.",
           });
         }
 
-        const mobile = params.username || params.mob || params.mobile;
-        const activeFinger = params.finger || finger || `finger_${Date.now()}`;
-        let targetUser = user;
-
+        let targetUser = null;
         if (isDbConnected) {
-          if (!targetUser && mobile) {
-            targetUser = await User.findOne({ mobile });
-          }
-          if (!targetUser && activeFinger && activeFinger !== "guest_finger") {
-            targetUser = await User.findOne({ finger: activeFinger });
-          }
-          if (!targetUser && mobile) {
+          targetUser = await User.findOne({ mobile });
+          if (!targetUser) {
             targetUser = await User.create({
               mobile,
-              finger: activeFinger,
+              finger: activeFinger !== "guest_finger" ? activeFinger : undefined,
               name: `کاربر ${mobile.slice(-4)}`,
               role: "customer",
             });
-          } else if (targetUser && activeFinger && activeFinger !== "guest_finger") {
+          } else if (activeFinger && activeFinger !== "guest_finger") {
             targetUser.finger = activeFinger;
             await targetUser.save();
           }
@@ -155,7 +180,13 @@ exports.handleOperation = async (req, res) => {
         let token = "";
         if (targetUser) {
           token = jwt.sign(
-            { userId: targetUser._id, role: targetUser.role },
+            { userId: targetUser._id, role: targetUser.role, mobile: targetUser.mobile, finger: activeFinger },
+            process.env.JWT_SECRET || "your-secret-key",
+            { expiresIn: "30d" }
+          );
+        } else {
+          token = jwt.sign(
+            { mobile, finger: activeFinger, role: "customer" },
             process.env.JWT_SECRET || "your-secret-key",
             { expiresIn: "30d" }
           );
@@ -163,10 +194,10 @@ exports.handleOperation = async (req, res) => {
 
         const fallbackUser = {
           id: Date.now(),
-          mobile: mobile || "09123456789",
+          mobile,
           fname: "کاربر",
-          lname: (mobile || "09123456789").slice(-4),
-          name: `کاربر ${(mobile || "09123456789").slice(-4)}`,
+          lname: mobile.slice(-4),
+          name: `کاربر ${mobile.slice(-4)}`,
           role: "customer",
         };
 

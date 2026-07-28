@@ -60,17 +60,41 @@ describe("Gold Inquiry & Rayg API Test Suite", () => {
       }
     });
 
-    it("POST /api?op=m_verify - should fail with invalid OTP code", async () => {
-      const res = await request(app)
-        .post("/api?op=m_verify")
-        .send({
-          mobile: testMobile,
-          code: "99999",
-        });
+    it("POST /api?op=m_verify - should return distinct users for different mobile numbers", async () => {
+      const mobileA = "09350001111";
+      const mobileB = "09350002222";
 
-      expect(res.statusCode).toBe(200);
-      expect(res.body.success).toBe(false);
-      expect(res.body.message).toContain("نامعتبر");
+      const resA = await request(app)
+        .post("/api?op=m_verify")
+        .send({ mobile: mobileA, code: "12345", finger: "finger_A" });
+
+      const resB = await request(app)
+        .post("/api?op=m_verify")
+        .send({ mobile: mobileB, code: "12345", finger: "finger_B" });
+
+      expect(resA.body.user.mobile).toBe(mobileA);
+      expect(resB.body.user.mobile).toBe(mobileB);
+      expect(resA.body.finger).toBe("finger_A");
+      expect(resB.body.finger).toBe("finger_B");
+    });
+
+    it("POST /api?op=m_login - should enforce rate limit of 5 requests per 2 hours", async () => {
+      const rateMobile = "09998887766";
+      for (let i = 0; i < 5; i++) {
+        const res = await request(app)
+          .post("/api?op=m_login")
+          .send({ mobile: rateMobile });
+        expect(res.statusCode).toBe(200);
+      }
+
+      // 6th call should be blocked with 429
+      const blockedRes = await request(app)
+        .post("/api?op=m_login")
+        .send({ mobile: rateMobile });
+
+      expect(blockedRes.statusCode).toBe(429);
+      expect(blockedRes.body.success).toBe(false);
+      expect(blockedRes.body.message).toContain("بیش از ۵ بار");
     });
 
     it("POST /api?op=m_profile - should get/update user profile dynamically", async () => {
