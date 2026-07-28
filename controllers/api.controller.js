@@ -1,5 +1,6 @@
 const mongoose = require("mongoose");
 const jwt = require("jsonwebtoken");
+const crypto = require("crypto");
 
 // Models
 const Report = require("../models/report.model");
@@ -16,14 +17,25 @@ const Lab = require("../models/lab.model");
 const redis = require("../scripts/redis");
 const fetchFromMSanjesh = require("../scripts/msanjesh");
 
+// Helper to generate unique crypto fingerprint
+function generateCryptoFinger(seed = "") {
+  return (
+    "f_" +
+    crypto
+      .createHash("sha256")
+      .update(`${seed}_${process.env.JWT_SECRET || "rayg_secret"}`)
+      .digest("hex")
+      .slice(0, 16)
+  );
+}
+
 // Helper to extract caller user / finger
 async function resolveCaller(req) {
   const params = { ...req.query, ...req.body };
-  const finger =
+  let finger =
     req.headers["x-user-finger"] ||
     params.finger ||
-    req.headers["finger"] ||
-    "guest_finger";
+    req.headers["finger"];
 
   let user = req.user || null;
 
@@ -34,17 +46,36 @@ async function resolveCaller(req) {
         token,
         process.env.JWT_SECRET || "your-secret-key"
       );
-      if (decoded && decoded.userId && mongoose.connection.readyState === 1) {
-        user = await User.findById(decoded.userId);
+      if (decoded) {
+        if (decoded.userId && mongoose.connection.readyState === 1) {
+          user = await User.findById(decoded.userId);
+        }
+        if ((!finger || finger === "guest_finger") && decoded.finger) {
+          finger = decoded.finger;
+        }
       }
     } catch (e) {}
   }
 
+  if (user && user.finger && user.finger !== "guest_finger") {
+    if (!finger || finger === "guest_finger") {
+      finger = user.finger;
+    }
+  }
+
   // Fallback find user by finger if logged in previously
-  if (!user && finger && mongoose.connection.readyState === 1) {
+  if (!user && finger && finger !== "guest_finger" && mongoose.connection.readyState === 1) {
     try {
       user = await User.findOne({ finger });
     } catch (e) {}
+  }
+
+  if (!finger || finger === "guest_finger") {
+    if (user && user.mobile) {
+      finger = generateCryptoFinger(`user_${user.mobile}`);
+    } else {
+      finger = "f_" + crypto.randomBytes(8).toString("hex");
+    }
   }
 
   return { finger, user };
@@ -83,7 +114,15 @@ exports.handleOperation = async (req, res) => {
       case "m_login": {
         const mobile =
           params.username || params.mob || params.mobile || "09123456789";
-        const reqFinger = params.finger || finger;
+        let reqFinger =
+          params.finger ||
+          req.headers["x-user-finger"] ||
+          req.headers["finger"] ||
+          finger;
+
+        if (!reqFinger || reqFinger === "guest_finger") {
+          reqFinger = generateCryptoFinger(`user_${mobile}`);
+        }
 
         // Rate limiting check: Max 5 OTP requests per mobile in 2 hours (7200s)
         const rateKey = `otp_count:${mobile}`;
@@ -117,20 +156,23 @@ exports.handleOperation = async (req, res) => {
           if (!dbUser) {
             dbUser = await User.create({
               mobile,
-              finger: reqFinger && reqFinger !== "guest_finger" ? reqFinger : undefined,
+              finger: reqFinger,
               name: `کاربر ${mobile.slice(-4)}`,
               role: "customer",
             });
-          } else if (reqFinger && reqFinger !== "guest_finger") {
+          } else if (!dbUser.finger || dbUser.finger === "guest_finger") {
             dbUser.finger = reqFinger;
             await dbUser.save();
           }
         }
 
+        const userFinger = dbUser?.finger || reqFinger;
+
         return res.json({
           success: true,
           message: "کد تایید برای شما ارسال شد",
           code: 12345,
+          finger: userFinger,
           user: dbUser || {
             id: Date.now(),
             mobile,
@@ -138,6 +180,7 @@ exports.handleOperation = async (req, res) => {
             lname: mobile.slice(-4),
             name: `کاربر ${mobile.slice(-4)}`,
             role: "customer",
+            finger: userFinger,
           },
         });
       }
@@ -145,7 +188,15 @@ exports.handleOperation = async (req, res) => {
       case "m_verify": {
         const code = params.code;
         const mobile = params.username || params.mob || params.mobile || "09123456789";
-        const activeFinger = params.finger || req.headers["x-user-finger"] || finger || `finger_${Date.now()}`;
+        let activeFinger =
+          params.finger ||
+          req.headers["x-user-finger"] ||
+          req.headers["finger"] ||
+          finger;
+
+        if (!activeFinger || activeFinger === "guest_finger") {
+          activeFinger = generateCryptoFinger(`user_${mobile}`);
+        }
 
         // Verify OTP from Redis or fallback 12345
         let validCode = "12345";
@@ -167,26 +218,35 @@ exports.handleOperation = async (req, res) => {
           if (!targetUser) {
             targetUser = await User.create({
               mobile,
-              finger: activeFinger !== "guest_finger" ? activeFinger : undefined,
+              finger: activeFinger,
               name: `کاربر ${mobile.slice(-4)}`,
               role: "customer",
             });
-          } else if (activeFinger && activeFinger !== "guest_finger") {
-            targetUser.finger = activeFinger;
+          } else {
+            if (!targetUser.finger || targetUser.finger === "guest_finger") {
+              targetUser.finger = activeFinger;
+            }
             await targetUser.save();
           }
         }
 
+        const finalFinger = targetUser?.finger || activeFinger;
+
         let token = "";
         if (targetUser) {
           token = jwt.sign(
-            { userId: targetUser._id, role: targetUser.role, mobile: targetUser.mobile, finger: activeFinger },
+            {
+              userId: targetUser._id,
+              role: targetUser.role,
+              mobile: targetUser.mobile,
+              finger: finalFinger,
+            },
             process.env.JWT_SECRET || "your-secret-key",
             { expiresIn: "30d" }
           );
         } else {
           token = jwt.sign(
-            { mobile, finger: activeFinger, role: "customer" },
+            { mobile, finger: finalFinger, role: "customer" },
             process.env.JWT_SECRET || "your-secret-key",
             { expiresIn: "30d" }
           );
@@ -199,10 +259,11 @@ exports.handleOperation = async (req, res) => {
           lname: mobile.slice(-4),
           name: `کاربر ${mobile.slice(-4)}`,
           role: "customer",
+          finger: finalFinger,
         };
 
         return res.json({
-          finger: activeFinger,
+          finger: finalFinger,
           token,
           success: true,
           message: "ورود موفقیت‌آمیز",
