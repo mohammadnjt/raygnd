@@ -67,6 +67,22 @@ function generateCryptoFinger(seed = "") {
   );
 }
 
+// Normalize mobile numbers (convert persian digits to english, standard format)
+function normalizeMobile(mobileStr) {
+  if (!mobileStr) return "";
+  let s = String(mobileStr).trim();
+  const persianNumbers = [/۰/g, /۱/g, /۲/g, /۳/g, /۴/g, /۵/g, /۶/g, /۷/g, /۸/g, /۹/g];
+  const arabicNumbers  = [/٠/g, /١/g, /٢/g, /٣/g, /٤/g, /٥/g, /٦/g, /٧/g, /٨/g, /٩/g];
+  for (let i = 0; i < 10; i++) {
+    s = s.replace(persianNumbers[i], i).replace(arabicNumbers[i], i);
+  }
+  if (s.startsWith("+98")) s = "0" + s.slice(3);
+  if (s.startsWith("0098")) s = "0" + s.slice(4);
+  if (s.startsWith("98") && s.length === 12) s = "0" + s.slice(2);
+  if (s.startsWith("9") && s.length === 10) s = "0" + s;
+  return s;
+}
+
 // Helper to extract and verify caller JWT token
 async function resolveUser(req) {
   const params = { ...req.query, ...req.body };
@@ -212,8 +228,8 @@ exports.handleOperation = async (req, res) => {
       // 2. Authentication (login, verify, profile)
       // ═══════════════════════════════════════════════════════════
       case "m_login": {
-        const mobile =
-          params.username || params.mob || params.mobile || "09123456789";
+        const rawMobile = params.username || params.mob || params.mobile || "09123456789";
+        const mobile = normalizeMobile(rawMobile);
 
         // Rate limiting check: Max 5 OTP requests per mobile in 2 hours (7200s)
         const rateKey = `otp_count:${mobile}`;
@@ -244,13 +260,6 @@ exports.handleOperation = async (req, res) => {
         let dbUser = null;
         if (isDbConnected) {
           dbUser = await User.findOne({ mobile });
-          if (!dbUser) {
-            dbUser = await User.create({
-              mobile,
-              name: `کاربر ${mobile.slice(-4)}`,
-              role: "customer",
-            });
-          }
         }
 
         return res.json({
@@ -270,16 +279,23 @@ exports.handleOperation = async (req, res) => {
 
       case "m_verify": {
         const code = params.code;
-        const mobile = params.username || params.mob || params.mobile || "09123456789";
+        const rawMobile = params.username || params.mob || params.mobile || "09123456789";
+        const mobile = normalizeMobile(rawMobile);
 
-        // Verify OTP from Redis or fallback 12345
-        let validCode = "12345";
+        // Verify OTP from Redis
+        let storedOtp = null;
         try {
-          const storedOtp = await redis.get(`otp:${mobile}`);
-          if (storedOtp) validCode = storedOtp;
+          storedOtp = await redis.get(`otp:${mobile}`);
         } catch (e) {}
 
-        if (!code || (String(code) !== String(validCode) && String(code) !== "12345")) {
+        if (!storedOtp) {
+          return res.json({
+            success: false,
+            message: "کد تایید منقضی شده یا درخواست نشده است.",
+          });
+        }
+
+        if (!code || String(code) !== String(storedOtp)) {
           return res.json({
             success: false,
             message: "کد وارد شده نامعتبر است.",

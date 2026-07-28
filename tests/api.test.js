@@ -60,6 +60,9 @@ describe("Gold Inquiry & Rayg API Test Suite", () => {
       const mobileA = "09350001111";
       const mobileB = "09350002222";
 
+      await request(app).post("/api?op=m_login").send({ mobile: mobileA });
+      await request(app).post("/api?op=m_login").send({ mobile: mobileB });
+
       const resA = await request(app)
         .post("/api?op=m_verify")
         .send({ mobile: mobileA, code: "12345" });
