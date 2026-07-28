@@ -97,6 +97,13 @@ describe("Gold Inquiry & Rayg API Test Suite", () => {
       expect(blockedRes.body.message).toContain("بیش از ۵ بار");
     });
 
+    it("POST /api?op=m_profile - should return empty response when finger is missing or empty", async () => {
+      const res = await request(app).post("/api?op=m_profile").send({});
+      expect(res.statusCode).toBe(200);
+      expect(res.body.success).toBe(false);
+      expect(res.body.data).toBeNull();
+    });
+
     it("POST /api?op=m_profile - should get/update user profile dynamically", async () => {
       const reqBuilder = request(app).post("/api?op=m_profile");
       if (authToken) {

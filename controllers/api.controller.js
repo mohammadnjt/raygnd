@@ -274,6 +274,21 @@ exports.handleOperation = async (req, res) => {
       case "m_profile": {
         let targetUser = user;
         const mobile = params.username || params.mob || params.mobile;
+        const rawFinger =
+          params.finger ||
+          req.headers["x-user-finger"] ||
+          req.headers["finger"];
+
+        // Return empty response if finger is missing, empty, or guest_finger
+        if (!rawFinger || rawFinger === "guest_finger" || !rawFinger.trim()) {
+          if (!mobile && !user) {
+            return res.json({
+              success: false,
+              message: "فینگر ارسال نشده است",
+              data: null,
+            });
+          }
+        }
 
         if (isDbConnected && !targetUser) {
           if (mobile) {
@@ -307,19 +322,7 @@ exports.handleOperation = async (req, res) => {
 
         return res.json({
           success: true,
-          data: {
-            id: Date.now(),
-            name: params.name || (mobile ? `کاربر ${mobile.slice(-4)}` : "کاربر عمومی"),
-            fname: params.fname || "کاربر",
-            lname: params.lname || (mobile ? mobile.slice(-4) : "عمومی"),
-            email: params.email || "",
-            phone: mobile || "09123456789",
-            mobile: mobile || "09123456789",
-            address: params.address || "",
-            role: "customer",
-            city: params.city || "",
-            avatar: "",
-          },
+          data: null,
         });
       }
 
