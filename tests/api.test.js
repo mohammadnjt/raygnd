@@ -272,7 +272,22 @@ describe("Gold Inquiry & Rayg API Test Suite", () => {
     let createdUserId = "";
     let createdTicketId = "";
 
-    it("GET /api?op=m_admin_users - should return paginated users list", async () => {
+    it("GET /api?op=m_admin_users - should return 403 forbidden for non-superAdmin user", async () => {
+      // Get token for non-superAdmin user
+      const customerVerify = await request(app)
+        .post("/api?op=m_verify")
+        .send({ mobile: "09990001122", code: "12345" });
+      const customerToken = customerVerify.body.token;
+
+      const res = await request(app)
+        .get("/api?op=m_admin_users&page=1&limit=10")
+        .set("Authorization", `Bearer ${customerToken}`);
+
+      expect(res.statusCode).toBe(403);
+      expect(res.body.success).toBe(false);
+    });
+
+    it("GET /api?op=m_admin_users - should return paginated users list for superAdmin user", async () => {
       const res = await request(app)
         .get("/api?op=m_admin_users&page=1&limit=10")
         .set("Authorization", `Bearer ${authToken}`);
