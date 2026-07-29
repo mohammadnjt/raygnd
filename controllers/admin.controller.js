@@ -57,9 +57,7 @@ exports.getUsers = async (req, res) => {
           { mobile: regex },
           { fname: regex },
           { lname: regex },
-          { name: regex },
           { city: regex },
-          { companyName: regex },
           { address: regex },
         ];
       }
@@ -136,7 +134,6 @@ exports.createUser = async (req, res) => {
       mobile,
       fname,
       lname,
-      name: `${fname || ""} ${lname || ""}`.trim(),
       role: role || "customer",
       city,
       address,

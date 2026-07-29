@@ -80,7 +80,6 @@ exports.login = async (req, res) => {
       mobile,
       fname: "کاربر",
       lname: mobile.slice(-4),
-      name: `کاربر ${mobile.slice(-4)}`,
       role: "customer",
     }),
   });
@@ -122,7 +121,6 @@ exports.verify = async (req, res) => {
       if (!targetUser) {
         targetUser = await User.create({
           mobile: cleanMobile,
-          name: `کاربر ${cleanMobile.slice(-4)}`,
           role: defaultRole,
         });
       }
@@ -151,7 +149,6 @@ exports.verify = async (req, res) => {
     mobile,
     fname: "کاربر",
     lname: mobile.slice(-4),
-    name: `کاربر ${mobile.slice(-4)}`,
     role: "customer",
   };
 
@@ -198,7 +195,7 @@ exports.updateProfile = async (req, res) => {
   try {
     const updateData = {};
     const { companyName, companyPhone, companyAddress } = req.body;
-    const allowedFields = ["fname", "lname", "name", "city", "address", "phone"];
+    const allowedFields = ["fname", "lname", "city", "address", "phone"];
     
     allowedFields.forEach((field) => {
       if (req.body[field] !== undefined) {

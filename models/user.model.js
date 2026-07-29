@@ -5,7 +5,6 @@ const UserSchema = new mongoose.Schema(
     mobile: { type: String, required: true, unique: true },
     fname: { type: String, default: "" },
     lname: { type: String, default: "" },
-    name: { type: String, default: "" },
     avatar: { type: String, default: "" },
     nationalCode: { type: String, default: "" },
     role: {
@@ -18,6 +17,7 @@ const UserSchema = new mongoose.Schema(
     phone: { type: String, default: "" },
     isActive: { type: Boolean, default: true },
     companyId: { type: mongoose.Schema.Types.ObjectId, ref: 'Company' },
+    referredBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
   },
   { timestamps: true }
 );

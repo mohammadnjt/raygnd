@@ -257,3 +257,94 @@
 - **نیاز به توکن:** دارد
 - **ساختار درخواست:** `multipart/form-data`
 - **پارامتر ارسالی:** `file` (فایل تصویری)
+
+### اطلاعات اپلیکیشن (About Us & Banners)
+- **آدرس:** `GET /api/version`
+- **نیاز به توکن:** ندارد
+- **خروجی:**
+```json
+{
+  "success": true,
+  "version": "1.0.0",
+  "aboutUs": {
+    "title": "درباره ما",
+    "description": "...",
+    "contactEmail": "info@example.com",
+    "contactPhone": "021-12345678"
+  },
+  "banners": [
+    "https://example.com/banner1.jpg"
+  ]
+}
+```
+
+### داشبورد (Dashboard - Top Labs)
+- **آدرس:** `GET /api/general/dashboard`
+- **نیاز به توکن:** ندارد (عمومی)
+- **خروجی:** لیست ۵ آزمایشگاه برتر بر اساس نمره.
+```json
+{
+  "success": true,
+  "topLabs": [
+    {
+      "_id": "...",
+      "labName": "آزمایشگاه طلا",
+      "labPhone": "...",
+      "labAddress": "...",
+      "labScore": 5,
+      "ownerId": "..."
+    }
+  ]
+}
+```
+
+## معرفی (Referrals)
+برای معرفی کردن طلافروشان و آزمایشگاه‌ها توسط خودشان و همچنین مشاهده لیست.
+
+### ایجاد معرفی
+- **آدرس:** `POST /api/referrals/create`
+- **نیاز به توکن:** دارد (فقط نقش‌های `gold` و `lab`)
+- **ورودی (JSON):**
+```json
+{
+  "targetMode": "gold", // یا lab
+  "targetMobile": "09123456789",
+  "targetFname": "نام",
+  "targetLname": "نام خانوادگی",
+  "targetCompanyName": "نام فروشگاه/آزمایشگاه",
+  "targetCompanyPhone": "021123456",
+  "targetCompanyAddress": "آدرس",
+  "targetCity": "تهران"
+}
+```
+
+### لیست معرفی‌ها
+- **آدرس:** `GET /api/referrals`
+- **نیاز به توکن:** دارد
+- **پارامترهای GET (اختیاری):** `?page=1&limit=10&status=pending` (status فقط برای ادمین کل کار می‌کند)
+- **توضیحات:** کاربران فقط معرفی‌های خود را می‌بینند. ادمین کل همه را می‌بیند.
+
+### تایید معرفی (ادمین کل)
+- **آدرس:** `POST /api/referrals/approve`
+- **نیاز به توکن:** دارد (فقط `superAdmin`)
+- **ورودی (JSON):**
+```json
+{
+  "id": "شناسه معرفی"
+}
+```
+
+### رد معرفی (ادمین کل)
+- **آدرس:** `POST /api/referrals/reject`
+- **نیاز به توکن:** دارد (فقط `superAdmin`)
+- **ورودی (JSON):**
+```json
+{
+  "id": "شناسه معرفی",
+  "reason": "دلیل رد شدن"
+}
+```
+
+### درخت معرفی‌ها (ادمین کل)
+- **آدرس:** `GET /api/referrals/tree`
+- **نیاز به توکن:** دارد (فقط `superAdmin`)

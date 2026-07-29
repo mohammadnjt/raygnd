@@ -189,3 +189,31 @@ exports.submitRental = async (req, res) => {
     return res.status(500).json({ success: false, message: "خطا در ثبت درخواست اجاره" });
   }
 };
+
+exports.getDashboard = async (req, res) => {
+  const isDbConnected = mongoose.connection.readyState === 1;
+  if (!isDbConnected) {
+    return res.json({ success: true, topLabs: [] });
+  }
+
+  try {
+    const topLabs = await Company.find({ mode: 'lab' })
+      .sort({ score: -1, createdAt: 1 })
+      .limit(5)
+      .lean();
+
+    return res.json({
+      success: true,
+      topLabs: topLabs.map(lab => ({
+        _id: lab._id,
+        labName: lab.name,
+        labPhone: lab.phone,
+        labAddress: lab.address,
+        labScore: lab.score,
+        ownerId: lab.owner,
+      }))
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: "خطا در دریافت اطلاعات داشبورد" });
+  }
+};

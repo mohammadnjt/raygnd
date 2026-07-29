@@ -8,6 +8,7 @@ router.post("/orders/assign-ang", authenticate, generalController.assignAng);
 router.post("/orders/deliver", authenticate, generalController.deliverOrder);
 
 router.get("/labs", generalController.getLabs);
+router.get("/dashboard", generalController.getDashboard);
 router.get("/notifications", authenticate, generalController.getNotifications);
 
 router.post("/requests/project", authenticate, generalController.submitProject);

@@ -15,6 +15,7 @@ const ticketRoutes = require('./routes/ticket.routes');
 const inquiryRoutes = require('./routes/inquiry.routes');
 const generalRoutes = require('./routes/general.routes');
 const uploadRoutes = require('./routes/upload.routes');
+const referralRoutes = require('./routes/referral.routes');
 
 const app = express();
 
@@ -47,10 +48,24 @@ app.use('/api/ticket', ticketRoutes);
 app.use('/api/inquiry', inquiryRoutes);
 app.use('/api/general', generalRoutes);
 app.use('/api/upload', uploadRoutes);
+app.use('/api/referrals', referralRoutes);
 
 // Version endpoint (used by tests)
 app.get('/api/version', (req, res) => {
-  res.json({ success: true, version: "1.0.0" });
+  res.json({ 
+    success: true, 
+    version: "1.0.0",
+    aboutUs: {
+      title: "درباره ما",
+      description: "ما یک پلتفرم جامع برای ارتباط طلا فروشان و آزمایشگاه‌های عیارسنجی طلا هستیم و تلاش می‌کنیم بهترین خدمات را به شما ارائه دهیم.",
+      contactEmail: "info@example.com",
+      contactPhone: "021-12345678"
+    },
+    banners: [
+      "https://example.com/banner1.jpg",
+      "https://example.com/banner2.jpg"
+    ]
+  });
 });
 
 app.get('/', (req, res) => {
