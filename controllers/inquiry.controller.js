@@ -4,7 +4,6 @@ const Bookmark = require("../models/bookmark.model");
 const Order = require("../models/order.model");
 const mongoose = require("mongoose");
 const axios = require("axios");
-const https = require("https");
 const { JSDOM } = require("jsdom");
 const FormData = require("form-data");
 
@@ -91,20 +90,37 @@ exports.inquiry = async (req, res) => {
         return engReceipt === code || row.receipt === code;
       });
       
-      validRows.forEach(row => {
+      const promises = validRows.map(async row => {
         const purity = persianToEnglishNumber(row.purity);
-        // Only add if we don't already have it
+        // Only add if we don't already have it in results
         if (!results.find(r => r.labName === row.labName && r.purity === purity)) {
-          results.push({
+          const newAng = {
             code,
             labName: row.labName,
             labPhone: "نامشخص",
             purity,
             date: "نامشخص",
             source: "msanjesh"
-          });
+          };
+          results.push(newAng);
+          
+          // Save to Ang collection if not exists
+          if (isDbConnected) {
+             try {
+               await Ang.updateOne(
+                 { code, labName: row.labName, purity },
+                 { $set: newAng },
+                 { upsert: true }
+               );
+             } catch (e) {
+               console.error("Error saving msanjesh data to Ang:", e.message);
+             }
+          }
         }
       });
+      
+      await Promise.all(promises);
+      
     } catch (error) {
       console.error("Error fetching msanjesh:", error.message);
     }
@@ -119,17 +135,19 @@ exports.inquiry = async (req, res) => {
     return res.status(404).json({ success: false, message: "کد ری‌گیری یافت نشد یا معتبر نیست." });
   }
 
-  // 3. Save to history if logged in
-  if (isDbConnected && req.user && req.user._id) {
+  // 3. Save to history
+  if (isDbConnected) {
     try {
-      const bestResult = results[0];
-      await InquiryHistory.create({
-        userId: req.user._id,
+      const historyData = {
         angCode: code,
-        labName: bestResult.labName,
-        purity: bestResult.purity,
-      });
-    } catch (err) {}
+      };
+      if (req.user && req.user._id) {
+         historyData.userId = req.user._id;
+      }
+      await InquiryHistory.create(historyData);
+    } catch (err) {
+       console.error("Error saving history:", err.message);
+    }
   }
 
   return res.json({ success: true, message: "استعلام با موفقیت انجام شد.", data: results });
