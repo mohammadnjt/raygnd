@@ -16,21 +16,22 @@ const authenticate = async (req, res, next) => {
 
     if (isDbConnected) {
       user = await User.findById(decoded.userId).lean();
-      
-      if (!user) {
-        return res.status(401).json({ success: false, message: "کاربر یافت نشد." });
-      }
     }
     
     if (!user) {
-      user = {
-        _id: decoded.userId,
-        mobile: decoded.mobile,
-        role: decoded.role,
-        fname: "کاربر",
-        lname: "مهمان",
-      };
+      if (process.env.NODE_ENV === "test") {
+        user = {
+          _id: decoded.userId,
+          mobile: decoded.mobile,
+          role: decoded.role,
+          fname: "کاربر",
+          lname: "مهمان",
+        };
+      } else {
+        return res.status(401).json({ success: false, message: "کاربر یافت نشد." });
+      }
     }
+
     req.user = user;
     next();
   } catch (error) {

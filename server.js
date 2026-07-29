@@ -36,7 +36,10 @@ mongoose.connect(process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/rayg', {
   useNewUrlParser: true,
   useUnifiedTopology: true,
   serverSelectionTimeoutMS: 2000,
-}).then(() => console.log('Connected to MongoDB'))
+}).then(() => {
+  console.log('Connected to MongoDB');
+  require('./fix-indexes')();
+})
 .catch(err => console.warn('[AI Studio] Could not connect to MongoDB:', err.message));
 
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
