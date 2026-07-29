@@ -23,6 +23,7 @@ exports.inquiry = async (req, res) => {
       localOrders.forEach(order => {
         results.push({
           code: order.stampCode,
+          customer: order.sellerName || "نامشخص",
           labName: order.labName || "نامشخص",
           labPhone: "نامشخص",
           purity: order.purity ? String(order.purity) : "نامشخص",
@@ -36,6 +37,7 @@ exports.inquiry = async (req, res) => {
         if (!results.find(r => r.labName === ang.labName && r.purity === ang.purity)) {
             results.push({
                 code: ang.code,
+                customer: ang.customer || "نامشخص",
                 labName: ang.labName,
                 labPhone: ang.labPhone,
                 purity: ang.purity,
@@ -51,7 +53,7 @@ exports.inquiry = async (req, res) => {
 
   // 2. Fetch from msanjesh
   if (process.env.NODE_ENV === "test" && code === "123456") {
-    results.push({ code, labName: "تست", labPhone: "نامشخص", purity: "750", date: "نامشخص", source: "mock" });
+    results.push({ code, customer: "نامشخص", labName: "تست", labPhone: "نامشخص", purity: "750", date: "نامشخص", source: "mock" });
   } else {
     try {
       const form = new FormData();
@@ -96,6 +98,7 @@ exports.inquiry = async (req, res) => {
         if (!results.find(r => r.labName === row.labName && r.purity === purity)) {
           const newAng = {
             code,
+            customer: row.customer || "نامشخص",
             labName: row.labName,
             labPhone: "نامشخص",
             purity,
@@ -128,7 +131,7 @@ exports.inquiry = async (req, res) => {
 
   // Fallback for tests if db is not connected
   if (results.length === 0 && !isDbConnected && code === "123456") {
-    results.push({ code, labName: "تست", labPhone: "نامشخص", purity: "750", date: "نامشخص", source: "mock" });
+    results.push({ code, customer: "نامشخص", labName: "تست", labPhone: "نامشخص", purity: "750", date: "نامشخص", source: "mock" });
   }
 
   if (results.length === 0) {

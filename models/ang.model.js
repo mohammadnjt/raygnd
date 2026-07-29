@@ -3,6 +3,7 @@ const mongoose = require("mongoose");
 const angSchema = new mongoose.Schema(
   {
     code: { type: String, required: true },
+    customer: { type: String, default: "" },
     labName: { type: String, default: "" },
     labPhone: { type: String, default: "" },
     purity: { type: String, default: "" },
