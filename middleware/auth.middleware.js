@@ -16,6 +16,10 @@ const authenticate = async (req, res, next) => {
 
     if (isDbConnected) {
       user = await User.findById(decoded.userId).lean();
+      
+      if (!user) {
+        return res.status(401).json({ success: false, message: "کاربر یافت نشد." });
+      }
     }
     
     if (!user) {

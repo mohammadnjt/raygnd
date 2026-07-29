@@ -1,6 +1,7 @@
 const Ang = require("../models/ang.model");
 const InquiryHistory = require("../models/inquiryHistory.model");
 const Bookmark = require("../models/bookmark.model");
+const Order = require("../models/order.model");
 const mongoose = require("mongoose");
 const axios = require("axios");
 const https = require("https");
@@ -14,19 +15,44 @@ exports.inquiry = async (req, res) => {
   }
 
   const isDbConnected = mongoose.connection.readyState === 1;
-  let localData = null;
+  let results = [];
 
+  // 1. Fetch from raygir (Order model)
   if (isDbConnected) {
     try {
-      localData = await Ang.findOne({ code }).lean();
-    } catch (e) {}
+      const localOrders = await Order.find({ stampCode: code }).lean();
+      localOrders.forEach(order => {
+        results.push({
+          code: order.stampCode,
+          labName: order.labName || "نامشخص",
+          labPhone: "نامشخص",
+          purity: order.purity ? String(order.purity) : "نامشخص",
+          date: order.meltedAtLabel || "نامشخص",
+          source: "raygir"
+        });
+      });
+      
+      const angs = await Ang.find({ code }).lean();
+      angs.forEach(ang => {
+        if (!results.find(r => r.labName === ang.labName && r.purity === ang.purity)) {
+            results.push({
+                code: ang.code,
+                labName: ang.labName,
+                labPhone: ang.labPhone,
+                purity: ang.purity,
+                date: ang.date,
+                source: ang.source || "local"
+            });
+        }
+      });
+    } catch (e) {
+      console.error("Error fetching local data:", e);
+    }
   }
 
-  let msanjeshData = null;
-  if (process.env.NODE_ENV === "test") {
-    if (code === "123456") {
-      msanjeshData = { code, labName: "تست", labPhone: "نامشخص", purity: "750", date: "نامشخص", source: "mock" };
-    }
+  // 2. Fetch from msanjesh
+  if (process.env.NODE_ENV === "test" && code === "123456") {
+    results.push({ code, labName: "تست", labPhone: "نامشخص", purity: "750", date: "نامشخص", source: "mock" });
   } else {
     try {
       const form = new FormData();
@@ -65,67 +91,48 @@ exports.inquiry = async (req, res) => {
         return engReceipt === code || row.receipt === code;
       });
       
-      if (validRows.length > 0) {
-        const firstRow = validRows[0];
-        msanjeshData = { 
-          code, 
-          labName: firstRow.labName, 
-          labPhone: "نامشخص", 
-          purity: persianToEnglishNumber(firstRow.purity), 
-          date: "نامشخص", 
-          source: "msanjesh" 
-        };
-      }
+      validRows.forEach(row => {
+        const purity = persianToEnglishNumber(row.purity);
+        // Only add if we don't already have it
+        if (!results.find(r => r.labName === row.labName && r.purity === purity)) {
+          results.push({
+            code,
+            labName: row.labName,
+            labPhone: "نامشخص",
+            purity,
+            date: "نامشخص",
+            source: "msanjesh"
+          });
+        }
+      });
     } catch (error) {
-      // Ignore msanjesh error if we have local data
+      console.error("Error fetching msanjesh:", error.message);
     }
   }
 
-  if (!localData && !msanjeshData) {
-    if (!isDbConnected && code === "123456") {
-      msanjeshData = { code, labName: "تست", labPhone: "نامشخص", purity: "750", date: "نامشخص", source: "mock" };
-    } else {
-      return res.status(404).json({ success: false, message: "کد ری‌گیری یافت نشد یا معتبر نیست." });
-    }
+  // Fallback for tests if db is not connected
+  if (results.length === 0 && !isDbConnected && code === "123456") {
+    results.push({ code, labName: "تست", labPhone: "نامشخص", purity: "750", date: "نامشخص", source: "mock" });
   }
 
-  let finalData = {};
-  if (msanjeshData && localData) {
-    finalData = { 
-      ...localData,
-      ...msanjeshData,
-      labPhone: msanjeshData.labPhone === "نامشخص" ? localData.labPhone : msanjeshData.labPhone,
-      date: msanjeshData.date === "نامشخص" ? localData.date : msanjeshData.date,
-      source: "local_and_msanjesh" 
-    };
-  } else if (msanjeshData) {
-    finalData = msanjeshData;
-  } else {
-    finalData = localData;
+  if (results.length === 0) {
+    return res.status(404).json({ success: false, message: "کد ری‌گیری یافت نشد یا معتبر نیست." });
   }
 
-  if (isDbConnected && msanjeshData) {
-    try {
-      if (!localData) {
-        await Ang.create({ ...msanjeshData, source: "msanjesh" });
-      } else {
-        await Ang.updateOne({ code }, { $set: { ...finalData, source: "local_and_msanjesh" } });
-      }
-    } catch (e) {}
-  }
-
+  // 3. Save to history if logged in
   if (isDbConnected && req.user && req.user._id) {
     try {
+      const bestResult = results[0];
       await InquiryHistory.create({
         userId: req.user._id,
         angCode: code,
-        labName: finalData.labName,
-        purity: finalData.purity,
+        labName: bestResult.labName,
+        purity: bestResult.purity,
       });
     } catch (err) {}
   }
 
-  return res.json({ success: true, message: "استعلام با موفقیت انجام شد.", data: finalData });
+  return res.json({ success: true, message: "استعلام با موفقیت انجام شد.", data: results });
 };
 
 exports.getHistory = async (req, res) => {
@@ -165,7 +172,6 @@ exports.addBookmark = async (req, res) => {
       labName: req.body.labName,
       purity: req.body.purity,
     });
-
     return res.json({ success: true, message: "با موفقیت نشان شد." });
   } catch (error) {
     return res.status(500).json({ success: false, message: "خطا در ثبت نشان." });
