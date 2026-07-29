@@ -3,7 +3,6 @@ const mongoose = require("mongoose");
 const BookmarkSchema = new mongoose.Schema(
   {
     userId: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
-    finger: { type: String, index: true },
     angCode: { type: String, required: true },
     labName: { type: String, default: "" },
     resultValue: { type: String, default: "" },

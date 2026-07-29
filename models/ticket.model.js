@@ -17,6 +17,7 @@ const TicketSchema = new mongoose.Schema(
     userId: { type: mongoose.Schema.Types.Mixed, required: true, index: true },
     userName: { type: String, default: "" },
     userMobile: { type: String, default: "" },
+    userRole: { type: String, default: "customer" },
     title: { type: String, required: true },
     department: { type: String, default: "پشتیبانی عمومی" },
     priority: { type: String, default: "medium" },

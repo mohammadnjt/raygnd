@@ -32,7 +32,6 @@ const OrderSchema = new mongoose.Schema(
     purity: { type: Number, default: null },
     trustWeight: { type: Number, default: null },
     purityResolvedAt: { type: String, default: null },
-    finger: { type: String, default: "" },
   },
   { timestamps: true }
 );

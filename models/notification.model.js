@@ -7,7 +7,6 @@ const NotificationSchema = new mongoose.Schema(
     message: { type: String, required: true },
     type: { type: String, default: "system" },
     isRead: { type: Boolean, default: false },
-    finger: { type: String, default: "" },
     userId: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
   },
   { timestamps: true }

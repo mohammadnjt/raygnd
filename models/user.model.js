@@ -17,7 +17,6 @@ const UserSchema = new mongoose.Schema(
     city: { type: String, default: "" },
     address: { type: String, default: "" },
     phone: { type: String, default: "" },
-    finger: { type: String, index: true },
     isActive: { type: Boolean, default: true },
     status: { type: String, default: "active" },
     labName: { type: String, default: "" },
