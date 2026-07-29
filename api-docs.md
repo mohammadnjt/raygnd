@@ -144,7 +144,7 @@
 ### دریافت لیست کاربران (Get Users)
 - **آدرس:** `GET /api/admin/users`
 - **نیاز به توکن:** دارد (فقط نقش admin و superAdmin)
-- **پارامترهای GET (اختیاری):** `?page=1&limit=10&search=علی&role=customer&status=active`
+- **پارامترهای GET (اختیاری):** `?page=1&limit=10&search=علی&role=customer&isActive=true`
 
 ### ایجاد کاربر جدید (Create User)
 - **آدرس:** `POST /api/admin/users/create`
@@ -169,7 +169,7 @@
 {
   "id": "شناسه_کاربر (ObjectId)",
   "fname": "نام جدید",
-  "status": "inactive"
+  "isActive": false
 }
 ```
 
@@ -189,6 +189,7 @@
 
 ### لیست سفارشات کاربر/آزمایشگاه (Get Orders)
 - **آدرس:** `GET /api/general/orders`
+- **پارامترهای GET (اختیاری):** `?page=1&limit=10&search=کد`
 - **نیاز به توکن:** دارد
 
 ### ثبت کد انگ روی سفارش (Assign Ang)
@@ -216,6 +217,7 @@
 
 ### لیست آزمایشگاه‌های فعال (Get Labs)
 - **آدرس:** `GET /api/general/labs`
+- **پارامترهای GET (اختیاری):** `?page=1&limit=10&search=نام`
 - **نیاز به توکن:** دارد
 
 ### لیست اعلانات (Notifications)

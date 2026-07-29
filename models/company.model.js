@@ -1,16 +1,15 @@
 const mongoose = require("mongoose");
 
-const LabSchema = new mongoose.Schema(
+const companySchema = new mongoose.Schema(
   {
+    mode: { type: String, enum: ['shop', 'lab'], required: true },
     name: { type: String, required: true },
-    city: { type: String, default: "" },
     phone: { type: String, default: "" },
     address: { type: String, default: "" },
     score: { type: Number, default: 0 },
-    rank: { type: String, default: "" },
-    isActive: { type: Boolean, default: true },
+    owner: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
   },
   { timestamps: true }
 );
 
-module.exports = mongoose.model("Lab", LabSchema);
+module.exports = mongoose.model("Company", companySchema);

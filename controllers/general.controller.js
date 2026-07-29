@@ -1,5 +1,5 @@
 const Order = require("../models/order.model");
-const Lab = require("../models/lab.model");
+const Company = require("../models/company.model");
 const Notification = require("../models/notification.model");
 const ProjectRequest = require("../models/projectRequest.model");
 const RentalRequest = require("../models/rentalRequest.model");
@@ -8,10 +8,14 @@ const mongoose = require("mongoose");
 exports.getOrders = async (req, res) => {
   const isDbConnected = mongoose.connection.readyState === 1;
   if (!isDbConnected) {
-    return res.json({ success: true, data: [] });
+    return res.json({ success: true, data: [], total: 0, page: 1, limit: 10, totalPages: 1 });
   }
 
   try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const search = String(req.query.search || "").trim();
+    
     const isAdmin = req.user?.role === "superAdmin";
     const query = {};
     if (!isAdmin && req.user?._id) {
@@ -21,8 +25,30 @@ exports.getOrders = async (req, res) => {
         query.userId = req.user._id;
       }
     }
-    const orders = await Order.find(query).sort({ createdAt: -1 }).lean();
-    return res.json({ success: true, data: orders });
+
+    if (search) {
+      query.$or = [
+        { orderNumber: { $regex: search, $options: "i" } },
+        { stampCode: { $regex: search, $options: "i" } }
+      ];
+    }
+
+    const orders = await Order.find(query)
+      .sort({ createdAt: -1 })
+      .skip((page - 1) * limit)
+      .limit(limit)
+      .lean();
+      
+    const totalOrders = await Order.countDocuments(query);
+
+    return res.json({ 
+      success: true, 
+      data: orders,
+      total: totalOrders,
+      page,
+      limit,
+      totalPages: Math.ceil(totalOrders / limit) || 1
+    });
   } catch (error) {
     return res.status(500).json({ success: false, message: "خطا در دریافت سفارشات" });
   }
@@ -73,11 +99,46 @@ exports.deliverOrder = async (req, res) => {
 
 exports.getLabs = async (req, res) => {
   const isDbConnected = mongoose.connection.readyState === 1;
-  if (!isDbConnected) return res.json({ success: true, data: [] });
+  if (!isDbConnected) {
+    return res.json({ success: true, data: [], total: 0, page: 1, limit: 10, totalPages: 1 });
+  }
 
   try {
-    const labs = await Lab.find({ isActive: true }).sort({ labScore: -1 }).lean();
-    return res.json({ success: true, data: labs });
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const search = String(req.query.search || "").trim();
+    
+    const query = { mode: 'lab' };
+    
+    if (search) {
+      query.$or = [
+        { name: { $regex: search, $options: "i" } }
+      ];
+    }
+
+    const labs = await Company.find(query)
+      .sort({ score: -1 })
+      .skip((page - 1) * limit)
+      .limit(limit)
+      .lean();
+      
+    const totalLabs = await Company.countDocuments(query);
+
+    return res.json({ 
+      success: true, 
+      data: labs.map(lab => ({
+        _id: lab._id,
+        labName: lab.name,
+        labPhone: lab.phone,
+        labAddress: lab.address,
+        labScore: lab.score,
+        ownerId: lab.owner,
+      })),
+      total: totalLabs,
+      page,
+      limit,
+      totalPages: Math.ceil(totalLabs / limit) || 1
+    });
   } catch (e) {
     return res.status(500).json({ success: false, message: "خطا در دریافت آزمایشگاه‌ها" });
   }

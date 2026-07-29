@@ -1,5 +1,6 @@
 const jwt = require("jsonwebtoken");
 const User = require("../models/user.model");
+const Company = require("../models/company.model");
 const redis = require("../scripts/redis");
 const mongoose = require("mongoose");
 
@@ -168,8 +169,17 @@ exports.getProfile = async (req, res) => {
   
   if (isDbConnected) {
     try {
-      const dbUser = await User.findById(user._id).lean();
-      if (dbUser) user = dbUser;
+      const dbUser = await User.findById(user._id).populate('companyId').lean();
+      if (dbUser) {
+          if (dbUser.companyId) {
+              dbUser.companyName = dbUser.companyId.name;
+              dbUser.companyPhone = dbUser.companyId.phone;
+              dbUser.companyAddress = dbUser.companyId.address;
+              dbUser.companyScore = dbUser.companyId.score;
+              dbUser.companyId = dbUser.companyId._id;
+          }
+          user = dbUser;
+      }
     } catch (e) {}
   }
 
@@ -187,7 +197,8 @@ exports.updateProfile = async (req, res) => {
 
   try {
     const updateData = {};
-    const allowedFields = ["fname", "lname", "name", "city", "address", "phone", "companyName", "companyPhone", "companyAddress"];
+    const { companyName, companyPhone, companyAddress } = req.body;
+    const allowedFields = ["fname", "lname", "name", "city", "address", "phone"];
     
     allowedFields.forEach((field) => {
       if (req.body[field] !== undefined) {
@@ -195,7 +206,42 @@ exports.updateProfile = async (req, res) => {
       }
     });
 
-    const updatedUser = await User.findByIdAndUpdate(req.user._id, updateData, { new: true }).lean();
+    const user = await User.findById(req.user._id);
+    if (!user) return res.status(404).json({ success: false, message: "کاربر یافت نشد." });
+    
+    Object.assign(user, updateData);
+    
+    if (user.role === "gold" || user.role === "lab") {
+        if (user.companyId) {
+            await Company.findByIdAndUpdate(user.companyId, {
+                mode: user.role === "gold" ? "shop" : "lab",
+                name: companyName !== undefined ? companyName : undefined,
+                phone: companyPhone !== undefined ? companyPhone : undefined,
+                address: companyAddress !== undefined ? companyAddress : undefined,
+            }, { omitUndefined: true });
+        } else if (companyName) {
+            const company = await Company.create({
+                mode: user.role === "gold" ? "shop" : "lab",
+                name: companyName,
+                phone: companyPhone || "",
+                address: companyAddress || "",
+                owner: user._id
+            });
+            user.companyId = company._id;
+        }
+    }
+
+    await user.save();
+    
+    const updatedUser = await User.findById(req.user._id).populate('companyId').lean();
+    if (updatedUser.companyId) {
+        updatedUser.companyName = updatedUser.companyId.name;
+        updatedUser.companyPhone = updatedUser.companyId.phone;
+        updatedUser.companyAddress = updatedUser.companyId.address;
+        updatedUser.companyScore = updatedUser.companyId.score;
+        updatedUser.companyId = updatedUser.companyId._id;
+    }
+    
     return res.json({
       success: true,
       message: "پروفایل با موفقیت بروزرسانی شد",

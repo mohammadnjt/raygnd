@@ -1,4 +1,5 @@
 const User = require("../models/user.model");
+const Company = require("../models/company.model");
 const mongoose = require("mongoose");
 
 function normalizePersianDigits(str) {
@@ -19,7 +20,7 @@ exports.getUsers = async (req, res) => {
 
   const search = String(req.query.search || req.query.q || "").trim();
   const roleFilter = String(req.query.role || "").trim();
-  const statusFilter = String(req.query.status || "").trim();
+  const isActiveFilter = req.query.isActive;
 
   let usersList = [];
   let totalUsers = 0;
@@ -42,14 +43,10 @@ exports.getUsers = async (req, res) => {
         query.role = englishRole;
       }
 
-      if (statusFilter && statusFilter !== "all") {
-        let englishStatus = statusFilter;
-        if (statusFilter === "فعال") englishStatus = "active";
-        if (statusFilter === "غیرفعال" || statusFilter === "غیر فعال") englishStatus = "inactive";
-        
-        if (englishStatus === "active") {
+      if (isActiveFilter !== undefined && isActiveFilter !== "all" && isActiveFilter !== "") {
+        if (isActiveFilter === "true" || isActiveFilter === true) {
           query.isActive = { $ne: false };
-        } else if (englishStatus === "inactive") {
+        } else if (isActiveFilter === "false" || isActiveFilter === false) {
           query.isActive = false;
         }
       }
@@ -68,7 +65,18 @@ exports.getUsers = async (req, res) => {
       }
 
       totalUsers = await User.countDocuments(query);
-      usersList = await User.find(query).sort({ createdAt: -1 }).skip(skip).limit(limit).lean();
+      const foundUsers = await User.find(query).populate('companyId').sort({ createdAt: -1 }).skip(skip).limit(limit).lean();
+      usersList = foundUsers.map(user => {
+        const u = { ...user };
+        if (u.companyId) {
+            u.companyName = u.companyId.name;
+            u.companyPhone = u.companyId.phone;
+            u.companyAddress = u.companyId.address;
+            u.companyScore = u.companyId.score;
+            u.companyId = u.companyId._id;
+        }
+        return u;
+      });
     } catch (e) {
       console.error("[getUsers] Error fetching users:", e.message);
     }
@@ -115,7 +123,7 @@ exports.createUser = async (req, res) => {
     return res.json({ success: true, message: "Mock success (DB offline)", data: { _id: Date.now() } });
   }
 
-  const { mobile, fname, lname, role, companyName, companyPhone, companyAddress, city, address } = req.body;
+  const { mobile, fname, lname, role, companyName, companyPhone, companyAddress, companyScore, city, address } = req.body;
   if (!mobile) return res.status(400).json({ success: false, message: "شماره موبایل الزامی است." });
 
   try {
@@ -124,20 +132,38 @@ exports.createUser = async (req, res) => {
       return res.status(400).json({ success: false, message: "کاربر با این شماره موبایل وجود دارد." });
     }
 
-    const newUser = await User.create({
+    const newUser = new User({
       mobile,
       fname,
       lname,
       name: `${fname || ""} ${lname || ""}`.trim(),
       role: role || "customer",
-      companyName,
-      companyPhone,
-      companyAddress,
       city,
       address,
     });
+    
+    if ((role === "gold" || role === "lab") && companyName) {
+        const company = await Company.create({
+            mode: role === "gold" ? "shop" : "lab",
+            name: companyName,
+            phone: companyPhone || "",
+            address: companyAddress || "",
+            score: companyScore || 0,
+            owner: newUser._id
+        });
+        newUser.companyId = company._id;
+    }
+    await newUser.save();
+    
+    const responseUser = newUser.toObject();
+    if (responseUser.companyId) {
+        responseUser.companyName = companyName;
+        responseUser.companyPhone = companyPhone;
+        responseUser.companyAddress = companyAddress;
+        responseUser.companyScore = companyScore;
+    }
 
-    return res.json({ success: true, message: "کاربر با موفقیت ایجاد شد.", data: newUser });
+    return res.json({ success: true, message: "کاربر با موفقیت ایجاد شد.", data: responseUser });
   } catch (error) {
     return res.status(500).json({ success: false, message: "خطا در ایجاد کاربر.", error: error.message });
   }
@@ -149,12 +175,47 @@ exports.updateUser = async (req, res) => {
     return res.json({ success: true, message: "Mock success (DB offline)", data: { _id: Date.now() } });
   }
 
-  const { id, ...updateData } = req.body;
+  const { id, companyName, companyPhone, companyAddress, companyScore, ...updateData } = req.body;
   if (!id) return res.status(400).json({ success: false, message: "شناسه کاربر الزامی است." });
 
   try {
-    const updatedUser = await User.findByIdAndUpdate(id, updateData, { new: true }).lean();
-    if (!updatedUser) return res.status(404).json({ success: false, message: "کاربر یافت نشد." });
+    const user = await User.findById(id);
+    if (!user) return res.status(404).json({ success: false, message: "کاربر یافت نشد." });
+    
+    Object.assign(user, updateData);
+    
+    if (user.role === "gold" || user.role === "lab") {
+        if (user.companyId) {
+            await Company.findByIdAndUpdate(user.companyId, {
+                mode: user.role === "gold" ? "shop" : "lab",
+                name: companyName !== undefined ? companyName : undefined,
+                phone: companyPhone !== undefined ? companyPhone : undefined,
+                address: companyAddress !== undefined ? companyAddress : undefined,
+                score: companyScore !== undefined ? companyScore : undefined,
+            }, { omitUndefined: true });
+        } else if (companyName) {
+            const company = await Company.create({
+                mode: user.role === "gold" ? "shop" : "lab",
+                name: companyName,
+                phone: companyPhone || "",
+                address: companyAddress || "",
+                score: companyScore || 0,
+                owner: user._id
+            });
+            user.companyId = company._id;
+        }
+    }
+    
+    await user.save();
+    
+    const updatedUser = await User.findById(id).populate('companyId').lean();
+    if (updatedUser.companyId) {
+        updatedUser.companyName = updatedUser.companyId.name;
+        updatedUser.companyPhone = updatedUser.companyId.phone;
+        updatedUser.companyAddress = updatedUser.companyId.address;
+        updatedUser.companyScore = updatedUser.companyId.score;
+        updatedUser.companyId = updatedUser.companyId._id;
+    }
 
     return res.json({ success: true, message: "کاربر با موفقیت بروزرسانی شد.", data: updatedUser });
   } catch (error) {

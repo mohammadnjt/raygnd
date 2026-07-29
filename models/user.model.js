@@ -17,10 +17,7 @@ const UserSchema = new mongoose.Schema(
     address: { type: String, default: "" },
     phone: { type: String, default: "" },
     isActive: { type: Boolean, default: true },
-    companyName: { type: String, default: "" },
-    companyPhone: { type: String, default: "" },
-    companyAddress: { type: String, default: "" },
-    companyScore: { type: Number, default: 0 },
+    companyId: { type: mongoose.Schema.Types.ObjectId, ref: 'Company' },
   },
   { timestamps: true }
 );
