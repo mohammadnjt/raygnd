@@ -38,7 +38,6 @@ exports.getUsers = async (req, res) => {
         if (roleFilter === "مشتری" || roleFilter === "کاربر عادی") englishRole = "customer";
         if (roleFilter === "طلاساز") englishRole = "gold";
         if (roleFilter === "آزمایشگاه" || roleFilter === "ری‌گیری") englishRole = "lab";
-        if (roleFilter === "مدیر" || roleFilter === "ادمین") englishRole = "admin";
         if (roleFilter === "مدیر کل" || roleFilter === "سوپر ادمین") englishRole = "superAdmin";
         query.role = englishRole;
       }
@@ -52,8 +51,6 @@ exports.getUsers = async (req, res) => {
           query.isActive = { $ne: false };
         } else if (englishStatus === "inactive") {
           query.isActive = false;
-        } else {
-          query.status = englishStatus;
         }
       }
 
@@ -65,8 +62,7 @@ exports.getUsers = async (req, res) => {
           { lname: regex },
           { name: regex },
           { city: regex },
-          { shopName: regex },
-          { labName: regex },
+          { companyName: regex },
           { address: regex },
         ];
       }
@@ -88,7 +84,7 @@ exports.getUsers = async (req, res) => {
         lname: "رضایی",
         role: "customer",
         city: "تهران",
-        status: "active",
+        isActive: true,
       },
       {
         _id: "u_2",
@@ -96,9 +92,9 @@ exports.getUsers = async (req, res) => {
         fname: "محمد",
         lname: "کریمی",
         role: "lab",
-        labName: "آزمایشگاه دقیق",
+        companyName: "آزمایشگاه دقیق",
         city: "اصفهان",
-        status: "active",
+        isActive: true,
       }
     ];
   }
@@ -119,7 +115,7 @@ exports.createUser = async (req, res) => {
     return res.json({ success: true, message: "Mock success (DB offline)", data: { _id: Date.now() } });
   }
 
-  const { mobile, fname, lname, role, companyName, shopName, labName, city, address } = req.body;
+  const { mobile, fname, lname, role, companyName, companyPhone, companyAddress, city, address } = req.body;
   if (!mobile) return res.status(400).json({ success: false, message: "شماره موبایل الزامی است." });
 
   try {
@@ -135,8 +131,8 @@ exports.createUser = async (req, res) => {
       name: `${fname || ""} ${lname || ""}`.trim(),
       role: role || "customer",
       companyName,
-      shopName,
-      labName,
+      companyPhone,
+      companyAddress,
       city,
       address,
     });

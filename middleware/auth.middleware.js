@@ -35,7 +35,7 @@ const authenticate = async (req, res, next) => {
 };
 
 const requireAdmin = (req, res, next) => {
-  if (!req.user || (req.user.role !== "admin" && req.user.role !== "superAdmin")) {
+  if (!req.user || req.user.role !== "superAdmin") {
     return res.status(401).json({ success: false, message: "دسترسی غیرمجاز. این بخش مخصوص مدیران است." });
   }
   next();

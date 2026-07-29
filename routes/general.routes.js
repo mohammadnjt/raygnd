@@ -7,7 +7,7 @@ router.get("/orders", authenticate, generalController.getOrders);
 router.post("/orders/assign-ang", authenticate, generalController.assignAng);
 router.post("/orders/deliver", authenticate, generalController.deliverOrder);
 
-router.get("/labs", authenticate, generalController.getLabs);
+router.get("/labs", generalController.getLabs);
 router.get("/notifications", authenticate, generalController.getNotifications);
 
 router.post("/requests/project", authenticate, generalController.submitProject);

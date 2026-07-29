@@ -17,7 +17,7 @@ async function setupUser() {
             lastName: 'User',
             phone: phone,
             role: 'user',
-            status: 'active'
+            isActive: true
         });
     }
     // Create JWT directly using AuthService or similar logic if accessible, 

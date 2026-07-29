@@ -46,7 +46,7 @@ exports.createTicket = async (req, res) => {
       messages: [{
         senderId: req.user?._id || "guest_id",
         senderName,
-        senderRole: req.user?.role === "superAdmin" || req.user?.role === "admin" ? "admin" : "user",
+        senderRole: req.user?.role === "superAdmin" ? "admin" : "user",
         message,
         attachments,
         createdAt: new Date(),
@@ -75,7 +75,7 @@ exports.getTickets = async (req, res) => {
   if (isDbConnected) {
     try {
       const query = {};
-      const isAdmin = req.user?.role === "superAdmin" || req.user?.role === "admin";
+      const isAdmin = req.user?.role === "superAdmin";
       if (!isAdmin && req.user?._id) {
         query.userId = req.user._id;
       }
@@ -163,7 +163,7 @@ exports.sendMessage = async (req, res) => {
 
     if (!ticket) return res.status(404).json({ success: false, message: "تیکت یافت نشد" });
 
-    const isAdmin = req.user?.role === "superAdmin" || req.user?.role === "admin";
+    const isAdmin = req.user?.role === "superAdmin";
     const senderRole = isAdmin ? "admin" : "user";
     const senderName = req.user?.name || `${req.user?.fname || ""} ${req.user?.lname || ""}`.trim() || req.user?.mobile || (isAdmin ? "پشتیبانی" : "کاربر");
     const attachments = Array.isArray(req.body.attachments) ? req.body.attachments : req.body.file ? [req.body.file] : [];

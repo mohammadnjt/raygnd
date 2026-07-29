@@ -24,6 +24,18 @@ function normalizeMobile(mobileStr) {
   return s;
 }
 
+function sanitizeUser(userObj) {
+  if (!userObj) return userObj;
+  const user = typeof userObj.toObject === 'function' ? userObj.toObject() : { ...userObj };
+  if (user.role === "customer" || user.role === "superAdmin") {
+    delete user.companyName;
+    delete user.companyPhone;
+    delete user.companyAddress;
+    delete user.companyScore;
+  }
+  return user;
+}
+
 exports.login = async (req, res) => {
   const rawMobile = req.body.username || req.body.mob || req.body.mobile || "09123456789";
   const mobile = normalizeMobile(rawMobile);
@@ -62,14 +74,14 @@ exports.login = async (req, res) => {
     success: true,
     message: "کد تایید برای شما ارسال شد",
     code: 12345,
-    user: dbUser || {
+    user: sanitizeUser(dbUser || {
       id: Date.now(),
       mobile,
       fname: "کاربر",
       lname: mobile.slice(-4),
       name: `کاربر ${mobile.slice(-4)}`,
       role: "customer",
-    },
+    }),
   });
 };
 
@@ -146,7 +158,7 @@ exports.verify = async (req, res) => {
     success: true,
     message: "ورود موفقیت‌آمیز بود",
     token,
-    user: targetUser || fallbackUser,
+    user: sanitizeUser(targetUser || fallbackUser),
   });
 };
 
@@ -163,7 +175,7 @@ exports.getProfile = async (req, res) => {
 
   return res.json({
     success: true,
-    data: user,
+    data: sanitizeUser(user),
   });
 };
 
@@ -175,7 +187,7 @@ exports.updateProfile = async (req, res) => {
 
   try {
     const updateData = {};
-    const allowedFields = ["fname", "lname", "name", "email", "city", "address", "phone", "labName", "labPhone", "labAddress", "shopName", "shopPhone", "shopAddress", "companyName", "businessName"];
+    const allowedFields = ["fname", "lname", "name", "city", "address", "phone", "companyName", "companyPhone", "companyAddress"];
     
     allowedFields.forEach((field) => {
       if (req.body[field] !== undefined) {
@@ -187,7 +199,7 @@ exports.updateProfile = async (req, res) => {
     return res.json({
       success: true,
       message: "پروفایل با موفقیت بروزرسانی شد",
-      data: updatedUser,
+      data: sanitizeUser(updatedUser),
     });
   } catch (error) {
     return res.status(500).json({ success: false, message: "خطا در بروزرسانی پروفایل." });

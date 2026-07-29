@@ -12,7 +12,7 @@ exports.getOrders = async (req, res) => {
   }
 
   try {
-    const isAdmin = req.user?.role === "superAdmin" || req.user?.role === "admin";
+    const isAdmin = req.user?.role === "superAdmin";
     const query = {};
     if (!isAdmin && req.user?._id) {
       if (req.user.role === "lab") {
