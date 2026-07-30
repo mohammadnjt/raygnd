@@ -34,6 +34,12 @@ function sanitizeUser(userObj) {
     delete user.companyAddress;
     delete user.companyScore;
   }
+
+  if (user.avatar && !user.avatar.startsWith('http')) {
+    const domain = process.env.DOMAIN_URL || "https://raygnd.blhgroups.ir";
+    user.avatar = `${domain}${user.avatar}`;
+  }
+
   return user;
 }
 

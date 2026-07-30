@@ -65,6 +65,42 @@ exports.assignAng = async (req, res) => {
     const order = await Order.findOne({ orderId });
     if (!order) return res.status(404).json({ success: false, message: "سفارش یافت نشد" });
 
+    // Check if order already has an ang (prevent duplicate assign to the same order)
+    if (order.stampCode) {
+      return res.status(400).json({ success: false, message: "برای این سفارش قبلا کد انگ ثبت شده است" });
+    }
+
+    const requestedPurity = req.body.purity || order.purity;
+
+    // Check if the same stampCode + labId + purity already exists
+    if (requestedPurity) {
+      const existingAng = await Order.findOne({
+        stampCode: stampCode,
+        labId: order.labId,
+        purity: requestedPurity,
+        _id: { $ne: order._id }
+      });
+      if (existingAng) {
+        return res.status(400).json({ 
+          success: false, 
+          message: "این کد انگ با همین عیار قبلا توسط این آزمایشگاه ثبت شده است" 
+        });
+      }
+    } else {
+       // if no purity, just check stampCode + labId
+       const existingAng = await Order.findOne({
+        stampCode: stampCode,
+        labId: order.labId,
+        _id: { $ne: order._id }
+      });
+      if (existingAng) {
+        return res.status(400).json({ 
+          success: false, 
+          message: "این کد انگ قبلا توسط این آزمایشگاه ثبت شده است" 
+        });
+      }
+    }
+
     order.stampCode = stampCode;
     order.status = "stamped";
     if (req.body.purity) order.purity = req.body.purity;
@@ -117,23 +153,32 @@ exports.getLabs = async (req, res) => {
     }
 
     const labs = await Company.find(query)
+      .populate('owner')
       .sort({ score: -1 })
       .skip((page - 1) * limit)
       .limit(limit)
       .lean();
-      
+    
     const totalLabs = await Company.countDocuments(query);
+    const domain = process.env.DOMAIN_URL || "https://raygnd.blhgroups.ir";
 
     return res.json({ 
       success: true, 
-      data: labs.map(lab => ({
-        _id: lab._id,
-        labName: lab.name,
-        labPhone: lab.phone,
-        labAddress: lab.address,
-        labScore: lab.score,
-        ownerId: lab.owner,
-      })),
+      data: labs.map(lab => {
+        let avatarUrl = "";
+        if (lab.owner && lab.owner.avatar) {
+            avatarUrl = lab.owner.avatar.startsWith('http') ? lab.owner.avatar : `${domain}${lab.owner.avatar}`;
+        }
+        return {
+          _id: lab._id,
+          labName: lab.name,
+          labPhone: lab.phone,
+          labAddress: lab.address,
+          labScore: lab.score,
+          ownerId: lab.owner ? lab.owner._id : null,
+          avatar: avatarUrl
+        };
+      }),
       total: totalLabs,
       page,
       limit,

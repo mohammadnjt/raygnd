@@ -73,6 +73,10 @@ exports.getUsers = async (req, res) => {
             u.companyScore = u.companyId.score;
             u.companyId = u.companyId._id;
         }
+        if (u.avatar && !u.avatar.startsWith('http')) {
+            const domain = process.env.DOMAIN_URL || "https://raygnd.blhgroups.ir";
+            u.avatar = `${domain}${u.avatar}`;
+        }
         return u;
       });
     } catch (e) {
