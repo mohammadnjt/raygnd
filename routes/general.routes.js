@@ -14,4 +14,5 @@ router.get("/notifications", authenticate, generalController.getNotifications);
 router.post("/requests/project", authenticate, generalController.submitProject);
 router.post("/requests/rental", authenticate, generalController.submitRental);
 
+router.post("/rate-company", authenticate, generalController.rateCompany);
 module.exports = router;

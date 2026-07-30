@@ -217,3 +217,51 @@ exports.getDashboard = async (req, res) => {
     return res.status(500).json({ success: false, message: "خطا در دریافت اطلاعات داشبورد" });
   }
 };
+
+const Review = require("../models/review.model");
+
+exports.rateCompany = async (req, res) => {
+  const isDbConnected = mongoose.connection.readyState === 1;
+  if (!isDbConnected) return res.status(503).json({ success: false, message: "دیتابیس متصل نیست" });
+
+  const { companyId, score, comment } = req.body;
+  if (!companyId) return res.status(400).json({ success: false, message: "شناسه مجموعه الزامی است." });
+  
+  const parsedScore = parseFloat(score);
+  if (isNaN(parsedScore) || parsedScore < 0 || parsedScore > 5) {
+    return res.status(400).json({ success: false, message: "امتیاز باید عددی بین ۰ تا ۵ باشد." });
+  }
+
+  try {
+    const company = await Company.findById(companyId);
+    if (!company) {
+      return res.status(404).json({ success: false, message: "مجموعه یافت نشد." });
+    }
+
+    // Check if user already rated
+    const existingReview = await Review.findOne({ user: req.user._id, company: companyId });
+    if (existingReview) {
+      return res.status(400).json({ success: false, message: "شما قبلا به این مجموعه امتیاز داده‌اید." });
+    }
+
+    await Review.create({
+      user: req.user._id,
+      company: companyId,
+      score: parsedScore,
+      comment: comment || ""
+    });
+
+    // Calculate new average score
+    const allReviews = await Review.find({ company: companyId });
+    const totalScore = allReviews.reduce((sum, rev) => sum + rev.score, 0);
+    const avgScore = allReviews.length > 0 ? (totalScore / allReviews.length) : 0;
+    
+    // Update company score
+    company.score = parseFloat(avgScore.toFixed(1));
+    await company.save();
+
+    return res.json({ success: true, message: "امتیاز شما با موفقیت ثبت شد.", data: { newScore: company.score } });
+  } catch (e) {
+    return res.status(500).json({ success: false, message: "خطا در ثبت امتیاز", error: e.message });
+  }
+};
