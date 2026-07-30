@@ -190,7 +190,8 @@ exports.updateUser = async (req, res) => {
                 address: companyAddress !== undefined ? companyAddress : undefined,
                 score: companyScore !== undefined ? companyScore : undefined,
             }, { omitUndefined: true });
-        } else if (companyName) {
+        } else {
+            if (!companyName) return res.status(400).json({ success: false, message: "جهت تغییر نقش، وارد کردن نام مجموعه الزامی است." });
             const company = await Company.create({
                 mode: user.role === "gold" ? "shop" : "lab",
                 name: companyName,

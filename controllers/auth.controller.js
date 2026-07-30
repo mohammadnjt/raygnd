@@ -109,6 +109,11 @@ exports.verify = async (req, res) => {
     });
   }
 
+  // Delete OTP after successful verification
+  try {
+    await redis.del(`otp:${mobile}`);
+  } catch(e) {}
+
   let targetUser = null;
   const cleanMobile = String(mobile).trim();
   const defaultRole = cleanMobile === "09121112233" ? "superAdmin" : "customer";

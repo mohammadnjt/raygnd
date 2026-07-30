@@ -31,8 +31,8 @@ exports.createReferral = async (req, res) => {
 
   try {
     const existingUser = await User.findOne({ mobile });
-    if (existingUser) {
-      return res.status(400).json({ success: false, message: "کاربر با این شماره موبایل در سیستم وجود دارد." });
+    if (existingUser && existingUser.role !== 'customer') {
+      return res.status(400).json({ success: false, message: "این کاربر از قبل به عنوان طلافروش یا آزمایشگاه در سیستم ثبت شده است." });
     }
 
     const referral = await Referral.create({
