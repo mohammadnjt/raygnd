@@ -28,11 +28,26 @@ exports.createReferral = async (req, res) => {
   }
 
   const mobile = normalizeMobile(targetMobile);
-
   try {
     const existingUser = await User.findOne({ mobile });
     if (existingUser && existingUser.role !== 'customer') {
       return res.status(400).json({ success: false, message: "این کاربر از قبل به عنوان طلافروش یا آزمایشگاه در سیستم ثبت شده است." });
+    }
+
+    if (targetCompanyPhone) {
+      const existingCompany = await Company.findOne({ phone: targetCompanyPhone });
+      if (existingCompany) {
+        return res.status(400).json({ success: false, message: "شماره تلفن مجموعه وارد شده قبلا در سیستم ثبت شده است." });
+      }
+      const existingReferralPhone = await Referral.findOne({ targetCompanyPhone, status: 'pending' });
+      if (existingReferralPhone) {
+        return res.status(400).json({ success: false, message: "یک درخواست در انتظار تایید با این شماره تلفن مجموعه وجود دارد." });
+      }
+    }
+
+    const existingReferral = await Referral.findOne({ targetMobile: mobile, status: 'pending' });
+    if (existingReferral) {
+      return res.status(400).json({ success: false, message: "یک درخواست در انتظار تایید با این شماره موبایل وجود دارد." });
     }
 
     const referral = await Referral.create({
@@ -57,7 +72,7 @@ exports.getReferrals = async (req, res) => {
   const page = parseInt(req.query.page) || 1;
   const limit = parseInt(req.query.limit) || 10;
   
-  const query = {};
+  const query = { status: 'pending' };
   if (req.user.role !== 'superAdmin') {
     query.introducer = req.user._id;
   } else if (req.query.status) {
@@ -103,28 +118,50 @@ exports.approveReferral = async (req, res) => {
       return res.status(400).json({ success: false, message: "این درخواست قبلا تعیین وضعیت شده است." });
     }
 
-    const existingUser = await User.findOne({ mobile: referral.targetMobile });
-    if (existingUser) {
-      return res.status(400).json({ success: false, message: "کاربر از قبل وجود دارد." });
+    let existingUser = await User.findOne({ mobile: referral.targetMobile });
+    let user = existingUser;
+
+    if (!user) {
+      user = new User({
+        mobile: referral.targetMobile,
+        fname: referral.targetFname,
+        lname: referral.targetLname,
+        role: referral.targetMode,
+        city: referral.targetCity,
+        referredBy: referral.introducer
+      });
+    } else {
+      user.fname = referral.targetFname || user.fname;
+      user.lname = referral.targetLname || user.lname;
+      user.role = referral.targetMode;
+      user.city = referral.targetCity || user.city;
+      if (!user.referredBy) {
+        user.referredBy = referral.introducer;
+      }
     }
 
-    const user = new User({
-      mobile: referral.targetMobile,
-      fname: referral.targetFname,
-      lname: referral.targetLname,
-      role: referral.targetMode,
-      city: referral.targetCity,
-      referredBy: referral.introducer
-    });
+    let company;
+    if (user.companyId) {
+      company = await Company.findById(user.companyId);
+      if (company) {
+        company.mode = referral.targetMode === "gold" ? "shop" : "lab";
+        company.name = referral.targetCompanyName;
+        company.phone = referral.targetCompanyPhone || company.phone;
+        company.address = referral.targetCompanyAddress || company.address;
+        await company.save();
+      }
+    }
     
-    const company = await Company.create({
-      mode: referral.targetMode === "gold" ? "shop" : "lab",
-      name: referral.targetCompanyName,
-      phone: referral.targetCompanyPhone || "",
-      address: referral.targetCompanyAddress || "",
-      owner: user._id
-    });
-    
+    if (!company) {
+      company = await Company.create({
+        mode: referral.targetMode === "gold" ? "shop" : "lab",
+        name: referral.targetCompanyName,
+        phone: referral.targetCompanyPhone || "",
+        address: referral.targetCompanyAddress || "",
+        owner: user._id
+      });
+    }
+
     user.companyId = company._id;
     await user.save();
     
