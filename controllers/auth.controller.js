@@ -208,6 +208,41 @@ exports.updateProfile = async (req, res) => {
       }
     });
 
+    if (req.body.avatar !== undefined) {
+      let avatarUrl = req.body.avatar;
+      // Strip domain if present
+      if (avatarUrl.startsWith('http')) {
+        try {
+          const urlObj = new URL(avatarUrl);
+          avatarUrl = urlObj.pathname;
+        } catch(e) {
+          // Ignore invalid URL
+        }
+      }
+      
+      // If it's from tmp, move it
+      if (avatarUrl.startsWith('/uploads/tmp/')) {
+        const path = require('path');
+        const fs = require('fs');
+        const filename = path.basename(avatarUrl);
+        const tmpPath = path.join(__dirname, '..', avatarUrl);
+        const profileDir = path.join(__dirname, '../uploads/profile');
+        const newPath = path.join(profileDir, filename);
+        
+        if (fs.existsSync(tmpPath)) {
+          if (!fs.existsSync(profileDir)) {
+            fs.mkdirSync(profileDir, { recursive: true });
+          }
+          fs.renameSync(tmpPath, newPath);
+          updateData.avatar = `/uploads/profile/${filename}`;
+        } else {
+          updateData.avatar = avatarUrl;
+        }
+      } else {
+        updateData.avatar = avatarUrl;
+      }
+    }
+
     const user = await User.findById(req.user._id);
     if (!user) return res.status(404).json({ success: false, message: "کاربر یافت نشد." });
     

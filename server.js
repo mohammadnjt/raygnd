@@ -43,6 +43,28 @@ mongoose.connect(process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/rayg', {
 
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
+// Cleanup tmp uploads older than 1 day
+setInterval(() => {
+  const tmpDir = path.join(__dirname, 'uploads/tmp');
+  if (fs.existsSync(tmpDir)) {
+    fs.readdir(tmpDir, (err, files) => {
+      if (err) return;
+      const now = Date.now();
+      const oneDay = 24 * 60 * 60 * 1000;
+      files.forEach(file => {
+        const filePath = path.join(tmpDir, file);
+        fs.stat(filePath, (err, stats) => {
+          if (err) return;
+          if (now - stats.mtimeMs > oneDay) {
+            fs.unlink(filePath, () => {});
+          }
+        });
+      });
+    });
+  }
+}, 60 * 60 * 1000); // Check every hour
+
+
 // New Routes Setup
 app.use('/api/auth', authRoutes);
 app.use('/api/admin', adminRoutes);

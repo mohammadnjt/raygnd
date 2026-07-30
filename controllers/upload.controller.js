@@ -4,7 +4,7 @@ const fs = require("fs");
 
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
-    const uploadPath = path.join(__dirname, "../uploads");
+    let uploadPath = path.join(__dirname, "../uploads/tmp");
     if (!fs.existsSync(uploadPath)) {
       fs.mkdirSync(uploadPath, { recursive: true });
     }
@@ -20,10 +20,13 @@ const upload = multer({
   storage: storage,
   limits: { fileSize: 10 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
-    if (file.mimetype.startsWith("image/")) {
+    // Check extension
+    const ext = path.extname(file.originalname).toLowerCase();
+    const allowedExts = ['.jpg', '.jpeg', '.png', '.gif', '.webp'];
+    if (allowedExts.includes(ext) || file.mimetype.startsWith("image/")) {
       cb(null, true);
     } else {
-      cb(new Error("فقط تصاویر مجاز هستند."));
+      cb(new Error("فقط فرمت‌های تصویر (jpg, jpeg, png, gif, webp) مجاز هستند."));
     }
   },
 });
@@ -36,7 +39,7 @@ exports.uploadFile = (req, res) => {
   }
 
   const domain = process.env.DOMAIN_URL || "https://raygnd.blhgroups.ir";
-  const relativePath = `/uploads/${req.file.filename}`;
+  const relativePath = `/uploads/tmp/${req.file.filename}`;
   const fullUrl = `${domain}${relativePath}`;
 
   return res.json({
