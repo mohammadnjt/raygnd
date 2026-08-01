@@ -416,3 +416,130 @@
 }
 ```
 - **توضیحات:** هر کاربر تنها یک بار می‌تواند به هر مجموعه امتیاز دهد. امتیاز باید عددی بین ۰ تا ۵ باشد. پس از ثبت، میانگین امتیازات مجموعه به‌روزرسانی می‌شود.
+
+### تنظیمات زمان‌بندی آزمایشگاه (Company Settings)
+- **آدرس:** `POST /api/auth/company/settings`
+- **نیاز به توکن:** دارد (کاربر باید مدیر آزمایشگاه/طلاساز باشد)
+- **ورودی (JSON):**
+```json
+{
+  "workingHours": {
+    "sat": ["10:00-11:00", "11:00-12:00"],
+    "sun": ["10:00-11:00", "11:00-12:00"],
+    "mon": ["10:00-11:00", "11:00-12:00"],
+    "tue": ["10:00-11:00", "11:00-12:00"],
+    "wed": ["10:00-11:00", "11:00-12:00"]
+  }
+}
+```
+- **توضیحات:** در فیلد `workingHours` برنامه کاری هر روز مشخص می‌شود. اگر روزی در این آبجکت وجود نداشته باشد یا آرایه آن خالی باشد، به معنای تعطیل بودن آزمایشگاه در آن روز است.
+
+### دریافت تنظیمات و زمان‌های خالی آزمایشگاه (Get Lab Settings)
+- **آدرس:** `GET /api/general/labs/:id/settings`
+- **پارامترهای GET (اختیاری):** `?date=1405/07/15`
+- **نیاز به توکن:** دارد
+- **توضیحات:** این API برنامه کاری آزمایشگاه را برمی‌گرداند. در صورتی که `date` ارسال شود، بررسی می‌کند کدام تایم‌ها در آن روز رزرو شده‌اند و مقدار `reserv` را `true` برمی‌گرداند.
+- **نمونه خروجی:**
+```json
+{
+  "success": true,
+  "lab": {
+    "_id": "6a6aa...",
+    "labName": "آزمایشگاه تهران",
+    "workingHours": {
+      "sun": [
+        {
+          "start": "10:00",
+          "end": "11:00",
+          "reserv": false
+        },
+        {
+          "start": "11:00",
+          "end": "12:00",
+          "reserv": true
+        }
+      ]
+    }
+  }
+}
+```
+
+### ثبت درخواست نوبت (Request Order)
+- **آدرس:** `POST /api/general/orders/request`
+- **نیاز به توکن:** دارد
+- **ورودی (JSON):**
+```json
+{
+  "labId": "6a6aa...",
+  "selectedDate": "1405/07/15",
+  "selectedTime": "10:00-11:30",
+  "meltMethod": "traditional",
+  "assayMethod": "fireAssay"
+}
+```
+- **نمونه خروجی:**
+```json
+{
+  "success": true,
+  "data": {
+    "_id": "6a6aa476...",
+    "orderNumber": "ORD-123456",
+    "lab": {
+      "_id": "6a6aa...",
+      "name": "آزمایشگاه تهران"
+    },
+    "selectedDate": "1405/07/15",
+    "selectedTime": "10:00-11:30",
+    "meltMethod": "traditional",
+    "assayMethod": "fireAssay"
+  }
+}
+```
+
+### به‌روزرسانی وضعیت و جزئیات سفارش (Update Order)
+- **آدرس:** `POST /api/general/orders/:id/update`
+- **نیاز به توکن:** دارد
+- **توضیحات:** آزمایشگاه با استفاده از این API می‌تواند در مراحل مختلف مقادیر مربوط به سفارش را پر کرده و وضعیت (status) آن را تغییر دهد.
+- **ورودی (JSON) - مقادیر اختیاری بر اساس مرحله:**
+```json
+{
+  "status": "confirmed", // "pending" | "cancelled" | "confirmed" | "received" | "melted" | "delivered" | "archived" | "completed"
+  "weight": 150,
+  "description": "",
+  "wageType": "gram", // "gram" | "toman" | "percent"
+  "wageValue": 15,
+  "totalPrice": 1000000,
+  "extraServices": [
+    { "title": "خدمات 1", "price": 50000 }
+  ],
+  "weightReceived": 150,
+  "imgReceived": "/uploads/gold/img.jpg",
+  "pieces": [
+    {
+      "weight": 10,
+      "dimensions": { "length": 15, "width": 10, "thickness": 2 },
+      "img": "/uploads/gold/piece.jpg",
+      "ang": "12345"
+    }
+  ],
+  "deliveryType": "final",
+  "deductions": 15,
+  "deliveredWeight": 135,
+  "purity": 750,
+  "trustWeight": 15,
+  "sampleDelivered": true,
+  "isPay": true
+}
+```
+- **نمونه خروجی:**
+```json
+{
+  "success": true,
+  "message": "سفارش با موفقیت به‌روزرسانی شد",
+  "data": {
+    "_id": "6a6aa...",
+    "orderNumber": "ORD-123",
+    "status": "confirmed"
+  }
+}
+```

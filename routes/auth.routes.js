@@ -8,4 +8,5 @@ router.post("/verify", authController.verify);
 router.get("/profile", authenticate, authController.getProfile);
 router.post("/profile", authenticate, authController.updateProfile);
 
+router.post("/company/settings", authenticate, authController.updateCompanySettings);
 module.exports = router;

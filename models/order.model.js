@@ -9,12 +9,41 @@ const OrderSchema = new mongoose.Schema(
     labId: { type: String, default: "" },
     labName: { type: String, default: "" },
     meltMethod: { type: String, default: "traditional" },
+    assayMethod: { type: String, default: "fireAssay" },
+    selectedDate: { type: String, default: null },
+    selectedTime: { type: String, default: null },
     source: { type: String, default: "online" },
     estimatedWeight: { type: Number, default: 0 },
+    weight: { type: Number, default: 0 },
+    description: { type: String, default: "" },
+    wageType: { type: String, enum: ["gram", "toman", "percent"], default: "toman" },
+    wageValue: { type: Number, default: 0 },
+    totalPrice: { type: Number, default: 0 },
+    extraServices: [
+      {
+        title: { type: String },
+        price: { type: Number }
+      }
+    ],
+    weightReceived: { type: Number, default: 0 },
+    imgReceived: { type: String, default: "" },
+    pieces: [
+      {
+        weight: { type: Number },
+        dimensions: {
+          length: { type: Number },
+          width: { type: Number },
+          thickness: { type: Number }
+        },
+        img: { type: String },
+        ang: { type: String }
+      }
+    ],
+    isPay: { type: Boolean, default: false },
     bookingDateLabel: { type: String, default: "" },
     status: {
       type: String,
-      enum: ["pending", "confirmed", "received", "melted", "delivered", "archived", "cancelled"],
+      enum: ["pending", "confirmed", "received", "melted", "delivered", "archived", "cancelled", "completed"],
       default: "pending",
     },
     hasJewel: { type: Boolean, default: false },

@@ -197,6 +197,29 @@ exports.getProfile = async (req, res) => {
   });
 };
 
+exports.updateCompanySettings = async (req, res) => {
+  const isDbConnected = mongoose.connection.readyState === 1;
+  if (!isDbConnected) {
+    return res.status(503).json({ success: false, message: "ارتباط با دیتابیس برقرار نیست." });
+  }
+
+  try {
+    const user = await User.findById(req.user._id);
+    if (!user) return res.status(404).json({ success: false, message: "کاربر یافت نشد." });
+    if (!user.companyId) return res.status(404).json({ success: false, message: "شما مجموعه‌ای ثبت نکرده‌اید." });
+
+    const { workingHours } = req.body;
+    const updateData = {};
+    if (workingHours !== undefined) updateData.workingHours = workingHours;
+
+    await Company.findByIdAndUpdate(user.companyId, updateData);
+    
+    return res.json({ success: true, message: "تنظیمات با موفقیت ذخیره شد." });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: "خطا در ذخیره تنظیمات." });
+  }
+};
+
 exports.updateProfile = async (req, res) => {
   const isDbConnected = mongoose.connection.readyState === 1;
   if (!isDbConnected) {

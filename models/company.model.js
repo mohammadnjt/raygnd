@@ -8,6 +8,8 @@ const companySchema = new mongoose.Schema(
     address: { type: String, default: "" },
     score: { type: Number, default: 0 },
     owner: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+
+    workingHours: { type: Object, default: {} },
   },
   { timestamps: true }
 );

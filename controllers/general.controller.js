@@ -1,4 +1,5 @@
 const Order = require("../models/order.model");
+const User = require("../models/user.model");
 const Company = require("../models/company.model");
 const Notification = require("../models/notification.model");
 const ProjectRequest = require("../models/projectRequest.model");
@@ -19,18 +20,24 @@ exports.getOrders = async (req, res) => {
     const isAdmin = req.user?.role === "superAdmin";
     const query = {};
     if (!isAdmin && req.user?._id) {
-      if (req.user.role === "lab") {
-        query.labId = req.user._id;
-      } else {
-        query.userId = req.user._id;
+      const orConditions = [{ sellerId: req.user._id.toString() }];
+      if (req.user.companyId) {
+        orConditions.push({ labId: req.user.companyId.toString() });
       }
+      query.$or = orConditions;
     }
 
     if (search) {
-      query.$or = [
-        { orderNumber: { $regex: search, $options: "i" } },
+      const searchConditions = [
+        { orderId: { $regex: search, $options: "i" } },
         { stampCode: { $regex: search, $options: "i" } }
       ];
+      if (query.$or) {
+        query.$and = [ { $or: query.$or }, { $or: searchConditions } ];
+        delete query.$or;
+      } else {
+        query.$or = searchConditions;
+      }
     }
 
     const orders = await Order.find(query)
@@ -38,12 +45,47 @@ exports.getOrders = async (req, res) => {
       .skip((page - 1) * limit)
       .limit(limit)
       .lean();
+
+    const formattedOrders = orders.map(order => ({
+        _id: order._id,
+        orderNumber: order.orderId,
+        customerName: order.sellerName,
+        customerPhone: order.sellerPhone,
+        orderDate: order.bookingDateLabel || order.createdAt,
+        status: order.status,
+        lab: {
+          _id: order.labId,
+          name: order.labName
+        },
+        meltMethod: order.meltMethod,
+        assayMethod: order.assayMethod,
+        selectedDate: order.selectedDate,
+        selectedTime: order.selectedTime,
+        weight: order.weight || order.estimatedWeight,
+        hasJewel: order.hasJewel,
+        description: order.description,
+        wageType: order.wageType,
+        wageValue: order.wageValue,
+        proformaNumber: order.proformaNumber,
+        extraServices: order.extraServices || [],
+        totalPrice: order.totalPrice,
+        weightReceived: order.weightReceived,
+        imgReceived: order.imgReceived,
+        pieces: order.pieces || [],
+        deliveryType: order.deliveryType,
+        deductions: order.deductions,
+        deliveredWeight: order.deliveredWeight,
+        purity: order.purity,
+        trustWeight: order.trustWeight,
+        sampleDelivered: order.sampleDelivered,
+        isPay: order.isPay
+    }));
       
     const totalOrders = await Order.countDocuments(query);
 
     return res.json({ 
       success: true, 
-      data: orders,
+      data: formattedOrders,
       total: totalOrders,
       page,
       limit,
@@ -308,5 +350,171 @@ exports.rateCompany = async (req, res) => {
     return res.json({ success: true, message: "امتیاز شما با موفقیت ثبت شد.", data: { newScore: company.score } });
   } catch (e) {
     return res.status(500).json({ success: false, message: "خطا در ثبت امتیاز", error: e.message });
+  }
+};
+
+
+exports.getLabSettings = async (req, res) => {
+  const isDbConnected = mongoose.connection.readyState === 1;
+  if (!isDbConnected) return res.status(503).json({ success: false, message: "دیتابیس متصل نیست" });
+  
+  try {
+    const labId = req.params.id;
+    const { date } = req.query; // e.g. 1405/07/15
+
+    const lab = await Company.findById(labId).lean();
+    if (!lab || lab.mode !== 'lab') {
+      return res.status(404).json({ success: false, message: "آزمایشگاه یافت نشد" });
+    }
+
+    let workingHours = lab.workingHours || {};
+    let reservedSlots = [];
+
+    if (date) {
+      const orders = await Order.find({ labId, selectedDate: date }).lean();
+      reservedSlots = orders.map(o => o.selectedTime).filter(Boolean);
+    }
+
+    const formattedWorkingHours = {};
+    for (const [day, timeSlots] of Object.entries(workingHours)) {
+      if (Array.isArray(timeSlots)) {
+        formattedWorkingHours[day] = timeSlots.map(timeStr => {
+          const parts = timeStr.split("-").map(s => s.trim());
+          const start = parts[0] || "";
+          const end = parts[1] || "";
+          return {
+            reserv: reservedSlots.includes(timeStr),
+            start,
+            end
+          };
+        });
+      }
+    }
+
+    return res.json({
+      success: true,
+      lab: {
+        _id: lab._id,
+        labName: lab.name,
+        workingHours: formattedWorkingHours
+      }
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: "خطا در دریافت تنظیمات آزمایشگاه" });
+  }
+};
+
+exports.requestOrder = async (req, res) => {
+  const isDbConnected = mongoose.connection.readyState === 1;
+  if (!isDbConnected) return res.status(503).json({ success: false, message: "دیتابیس متصل نیست" });
+  
+  try {
+    const user = await User.findById(req.user._id).lean();
+    if (!user) return res.status(401).json({ success: false, message: "کاربر یافت نشد" });
+
+    const { labId, selectedDate, selectedTime, meltMethod, assayMethod } = req.body;
+    
+    if (!labId || !selectedDate || !selectedTime) {
+      return res.status(400).json({ success: false, message: "آزمایشگاه، تاریخ و ساعت الزامی است" });
+    }
+
+    const lab = await Company.findById(labId).lean();
+    if (!lab || lab.mode !== 'lab') {
+      return res.status(404).json({ success: false, message: "آزمایشگاه نامعتبر است" });
+    }
+
+    const existingOrder = await Order.findOne({ labId, selectedDate, selectedTime });
+    if (existingOrder) {
+      return res.status(400).json({ success: false, message: "این زمان قبلا رزرو شده است" });
+    }
+
+    const orderNumber = "ORD-" + Date.now().toString().slice(-6) + Math.floor(Math.random() * 1000);
+
+    const newOrder = await Order.create({
+      orderId: orderNumber,
+      sellerId: user._id.toString(),
+      sellerName: user.fname ? (user.fname + " " + user.lname).trim() : user.mobile,
+      sellerPhone: user.phone || user.mobile,
+      labId: lab._id.toString(),
+      labName: lab.name,
+      selectedDate,
+      selectedTime,
+      meltMethod: meltMethod || 'traditional',
+      assayMethod: assayMethod || 'fireAssay',
+      status: 'pending',
+      bookingDateLabel: selectedDate
+    });
+
+    return res.json({
+      success: true,
+      data: {
+        _id: newOrder._id,
+        orderNumber: newOrder.orderId,
+        lab: {
+          _id: lab._id,
+          name: lab.name
+        },
+        selectedDate: newOrder.selectedDate,
+        selectedTime: newOrder.selectedTime,
+        meltMethod: newOrder.meltMethod,
+        assayMethod: newOrder.assayMethod
+      }
+    });
+
+  } catch (error) {
+    return res.status(500).json({ success: false, message: "خطا در ثبت نوبت" });
+  }
+};
+
+
+exports.updateOrder = async (req, res) => {
+  const isDbConnected = mongoose.connection.readyState === 1;
+  if (!isDbConnected) return res.status(503).json({ success: false, message: "دیتابیس متصل نیست" });
+  
+  try {
+    const orderIdParam = req.params.id; // this is the _id of the order
+    const order = await Order.findById(orderIdParam);
+    if (!order) return res.status(404).json({ success: false, message: "سفارش یافت نشد" });
+
+    // Check permissions (superAdmin or lab owner or the seller)
+    const user = await User.findById(req.user._id).lean();
+    const isAdmin = user.role === 'superAdmin';
+    const isLab = order.labId === user.companyId?.toString();
+    const isSeller = order.sellerId === user._id.toString();
+
+    if (!isAdmin && !isLab && !isSeller) {
+        return res.status(403).json({ success: false, message: "شما دسترسی ویرایش این سفارش را ندارید" });
+    }
+
+    const updatableFields = [
+      "status", "weight", "description", "wageType", "wageValue", 
+      "totalPrice", "extraServices", "weightReceived", "imgReceived", 
+      "pieces", "isPay", "deliveryType", "deductions", "deliveredWeight", 
+      "purity", "trustWeight", "sampleDelivered"
+    ];
+
+    let hasChanges = false;
+    updatableFields.forEach(field => {
+      if (req.body[field] !== undefined) {
+        order[field] = req.body[field];
+        hasChanges = true;
+      }
+    });
+
+    if (hasChanges) {
+      await order.save();
+    }
+
+    return res.json({
+      success: true,
+      message: "سفارش با موفقیت به‌روزرسانی شد",
+      data: {
+        _id: order._id,
+        orderNumber: order.orderId,
+        status: order.status
+      }
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: "خطا در به‌روزرسانی سفارش", error: error.message });
   }
 };

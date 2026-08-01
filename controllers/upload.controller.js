@@ -4,7 +4,9 @@ const fs = require("fs");
 
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
-    let uploadPath = path.join(__dirname, "../uploads/tmp");
+    let folder = "tmp";
+    if (req.query.type === "gold" || req.body.type === "gold") folder = "gold";
+    let uploadPath = path.join(__dirname, "../uploads/" + folder);
     if (!fs.existsSync(uploadPath)) {
       fs.mkdirSync(uploadPath, { recursive: true });
     }
@@ -39,7 +41,9 @@ exports.uploadFile = (req, res) => {
   }
 
   const domain = process.env.DOMAIN_URL || "https://raygnd.blhgroups.ir";
-  const relativePath = `/uploads/tmp/${req.file.filename}`;
+  let folder = "tmp";
+  if (req.query.type === "gold" || req.body.type === "gold") folder = "gold";
+  const relativePath = `/uploads/${folder}/${req.file.filename}`;
   const fullUrl = `${domain}${relativePath}`;
 
   return res.json({
