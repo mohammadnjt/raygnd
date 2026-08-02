@@ -210,7 +210,27 @@ exports.updateCompanySettings = async (req, res) => {
 
     const { workingHours } = req.body;
     const updateData = {};
-    if (workingHours !== undefined) updateData.workingHours = workingHours;
+    if (workingHours !== undefined) {
+      if (typeof workingHours !== 'object' || Array.isArray(workingHours) || workingHours === null) {
+        return res.status(400).json({ success: false, message: "فرمت workingHours نامعتبر است. باید یک آبجکت باشد." });
+      }
+      
+      const validDays = ['sat', 'sun', 'mon', 'tue', 'wed', 'thu', 'fri'];
+      for (const day in workingHours) {
+        if (!validDays.includes(day)) {
+           return res.status(400).json({ success: false, message: `روز نامعتبر: ${day}` });
+        }
+        if (!Array.isArray(workingHours[day])) {
+           return res.status(400).json({ success: false, message: `تایم‌های کاری روز ${day} باید آرایه باشد.` });
+        }
+        for (const time of workingHours[day]) {
+          if (typeof time !== 'string' || !time.includes('-')) {
+             return res.status(400).json({ success: false, message: `فرمت تایم کاری نامعتبر است: ${time}. باید به فرمت 10:00-11:00 باشد.` });
+          }
+        }
+      }
+      updateData.workingHours = workingHours;
+    }
 
     await Company.findByIdAndUpdate(user.companyId, updateData);
     

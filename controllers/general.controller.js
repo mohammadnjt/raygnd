@@ -362,6 +362,10 @@ exports.getLabSettings = async (req, res) => {
     const labId = req.params.id;
     const { date } = req.query; // e.g. 1405/07/15
 
+    if (!mongoose.Types.ObjectId.isValid(labId)) {
+      return res.status(400).json({ success: false, message: "شناسه آزمایشگاه نامعتبر است" });
+    }
+
     const lab = await Company.findById(labId).lean();
     if (!lab || lab.mode !== 'lab') {
       return res.status(404).json({ success: false, message: "آزمایشگاه یافت نشد" });
@@ -379,6 +383,9 @@ exports.getLabSettings = async (req, res) => {
     for (const [day, timeSlots] of Object.entries(workingHours)) {
       if (Array.isArray(timeSlots)) {
         formattedWorkingHours[day] = timeSlots.map(timeStr => {
+          if (typeof timeStr !== 'string') {
+            return null;
+          }
           const parts = timeStr.split("-").map(s => s.trim());
           const start = parts[0] || "";
           const end = parts[1] || "";
@@ -387,7 +394,7 @@ exports.getLabSettings = async (req, res) => {
             start,
             end
           };
-        });
+        }).filter(Boolean);
       }
     }
 
@@ -400,7 +407,7 @@ exports.getLabSettings = async (req, res) => {
       }
     });
   } catch (error) {
-    return res.status(500).json({ success: false, message: "خطا در دریافت تنظیمات آزمایشگاه" });
+    console.error("Get Lab Settings Error:", error); return res.status(500).json({ success: false, message: "خطا در دریافت تنظیمات آزمایشگاه", error: error.message });
   }
 };
 
