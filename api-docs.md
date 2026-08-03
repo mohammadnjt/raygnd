@@ -191,6 +191,32 @@
 - **آدرس:** `GET /api/general/orders`
 - **پارامترهای GET (اختیاری):** `?page=1&limit=10&search=کد`
 - **نیاز به توکن:** دارد
+- **توضیحات:** لیست سفارشات کاربر (یا آزمایشگاه) را برمی‌گرداند. فیلد `manual: true` نشان‌دهنده سفارشی است که توسط خود آزمایشگاه ثبت شده است. فیلدهای `weight` (وزن اولیه) و `weightReceived` (وزن دریافتی در آزمایشگاه) به همراه سایر جزئیات در خروجی قرار دارند.
+- **نمونه خروجی:**
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "_id": "6a6aa...",
+      "orderNumber": "ORD-123456",
+      "status": "pending",
+      "manual": false,
+      "description": "توضیحات سفارش",
+      "weight": 50.5,
+      "weightReceived": 0,
+      "lab": {
+        "_id": "6a...",
+        "name": "آزمایشگاه تهران"
+      }
+    }
+  ],
+  "total": 1,
+  "page": 1,
+  "limit": 10,
+  "totalPages": 1
+}
+```
 
 ### ثبت کد انگ روی سفارش (Assign Ang)
 - **آدرس:** `POST /api/general/orders/assign-ang`
@@ -474,9 +500,13 @@
   "selectedDate": "1405/07/15",
   "selectedTime": "10:00-11:30",
   "meltMethod": "traditional",
-  "assayMethod": "fireAssay"
+  "assayMethod": "fireAssay",
+  "description": "توضیحات اختیاری",
+  "weight": 50.5,
+  "hasJewel": false
 }
 ```
+- **توضیحات:** اگر آزمایشگاه برای خودش نوبت ثبت کند، سیستم به صورت خودکار `manual: true` را اعمال می‌کند.
 - **نمونه خروجی:**
 ```json
 {
@@ -491,7 +521,11 @@
     "selectedDate": "1405/07/15",
     "selectedTime": "10:00-11:30",
     "meltMethod": "traditional",
-    "assayMethod": "fireAssay"
+    "assayMethod": "fireAssay",
+    "description": "توضیحات اختیاری",
+    "weight": 50.5,
+    "hasJewel": false,
+    "manual": true
   }
 }
 ```
@@ -543,3 +577,13 @@
   }
 }
 ```
+
+### دریافت زیرمجموعه‌های معرفی شده (Referrals)
+- **آدرس:** `GET /api/auth/referrals`
+- **نیاز به توکن:** دارد
+- **توضیحات:** لیست کاربرانی (و شرکت‌های آن‌ها) که توسط کاربر فعلی معرفی شده‌اند را برمی‌گرداند. زیرشاخه‌های لایه دوم نیز در فیلد `subReferrals` بازگردانده می‌شوند.
+
+### دریافت آزمایشگاه‌های اخیر (Recent Labs)
+- **آدرس:** `GET /api/general/labs/recent`
+- **نیاز به توکن:** دارد
+- **توضیحات:** حداکثر ۴ آزمایشگاهی که طلافروش اخیرا در آن‌ها نوبت گرفته و به مرحله بایگانی (`archived` یا `completed`) رسیده است را برمی‌گرداند.

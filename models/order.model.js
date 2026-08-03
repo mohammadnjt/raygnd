@@ -41,6 +41,7 @@ const OrderSchema = new mongoose.Schema(
     ],
     isPay: { type: Boolean, default: false },
     bookingDateLabel: { type: String, default: "" },
+    manual: { type: Boolean, default: false },
     status: {
       type: String,
       enum: ["pending", "confirmed", "received", "melted", "delivered", "archived", "cancelled", "completed"],

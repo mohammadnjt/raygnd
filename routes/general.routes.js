@@ -9,6 +9,7 @@ router.post("/orders/deliver", authenticate, generalController.deliverOrder);
 router.post("/orders/:id/update", authenticate, generalController.updateOrder);
 
 router.get("/labs", generalController.getLabs);
+router.get("/labs/recent", authenticate, generalController.getRecentLabs);
 router.get("/labs/:id/settings", authenticate, generalController.getLabSettings);
 router.post("/orders/request", authenticate, generalController.requestOrder);
 router.get("/dashboard", generalController.getDashboard);

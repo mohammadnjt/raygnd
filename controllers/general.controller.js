@@ -64,6 +64,7 @@ exports.getOrders = async (req, res) => {
         weight: order.weight || order.estimatedWeight,
         hasJewel: order.hasJewel,
         description: order.description,
+        manual: order.manual || false,
         wageType: order.wageType,
         wageValue: order.wageValue,
         proformaNumber: order.proformaNumber,
@@ -419,7 +420,7 @@ exports.requestOrder = async (req, res) => {
     const user = await User.findById(req.user._id).lean();
     if (!user) return res.status(401).json({ success: false, message: "کاربر یافت نشد" });
 
-    const { labId, selectedDate, selectedTime, meltMethod, assayMethod } = req.body;
+    const { labId, selectedDate, selectedTime, meltMethod, assayMethod, description, weight, hasJewel } = req.body;
     
     if (!labId || !selectedDate || !selectedTime) {
       return res.status(400).json({ success: false, message: "آزمایشگاه، تاریخ و ساعت الزامی است" });
@@ -437,6 +438,8 @@ exports.requestOrder = async (req, res) => {
 
     const orderNumber = "ORD-" + Date.now().toString().slice(-6) + Math.floor(Math.random() * 1000);
 
+    const isManual = user.companyId && user.companyId.toString() === lab._id.toString();
+
     const newOrder = await Order.create({
       orderId: orderNumber,
       sellerId: user._id.toString(),
@@ -448,6 +451,10 @@ exports.requestOrder = async (req, res) => {
       selectedTime,
       meltMethod: meltMethod || 'traditional',
       assayMethod: assayMethod || 'fireAssay',
+      description: description || '',
+      weight: weight || 0,
+      hasJewel: !!hasJewel,
+      manual: !!isManual,
       status: 'pending',
       bookingDateLabel: selectedDate
     });
@@ -523,5 +530,35 @@ exports.updateOrder = async (req, res) => {
     });
   } catch (error) {
     return res.status(500).json({ success: false, message: "خطا در به‌روزرسانی سفارش", error: error.message });
+  }
+};
+
+exports.getRecentLabs = async (req, res) => {
+  const isDbConnected = mongoose.connection.readyState === 1;
+  if (!isDbConnected) return res.status(503).json({ success: false, message: "دیتابیس متصل نیست" });
+  
+  try {
+    const orders = await Order.find({ 
+      sellerId: req.user._id.toString(), 
+      status: { $in: ['archived', 'completed'] }
+    })
+    .sort({ createdAt: -1 })
+    .lean();
+
+    const labIds = [];
+    for (const order of orders) {
+      if (!labIds.includes(order.labId)) {
+        labIds.push(order.labId);
+      }
+      if (labIds.length >= 4) break;
+    }
+
+    const labs = await Company.find({ _id: { $in: labIds } }).lean();
+    const sortedLabs = labIds.map(id => labs.find(l => l._id.toString() === id)).filter(Boolean);
+
+    return res.json({ success: true, data: sortedLabs });
+  } catch (error) {
+    console.error("Recent Labs Error:", error);
+    return res.status(500).json({ success: false, message: "خطا در دریافت آزمایشگاه‌های اخیر" });
   }
 };

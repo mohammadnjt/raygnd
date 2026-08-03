@@ -337,3 +337,28 @@ exports.updateProfile = async (req, res) => {
     return res.status(500).json({ success: false, message: "خطا در بروزرسانی پروفایل." });
   }
 };
+
+exports.getReferrals = async (req, res) => {
+  const isDbConnected = mongoose.connection.readyState === 1;
+  if (!isDbConnected) return res.status(503).json({ success: false, message: "دیتابیس متصل نیست" });
+  
+  try {
+    const userId = req.user._id;
+
+    const firstLevel = await User.find({ referredBy: userId }).populate('companyId').lean();
+
+    const result = [];
+    for (const user of firstLevel) {
+      const secondLevel = await User.find({ referredBy: user._id }).populate('companyId').lean();
+      result.push({
+        ...user,
+        subReferrals: secondLevel
+      });
+    }
+
+    return res.json({ success: true, data: result });
+  } catch (error) {
+    console.error("Referrals Error:", error);
+    return res.status(500).json({ success: false, message: "خطا در دریافت زیرمجموعه‌ها" });
+  }
+};
