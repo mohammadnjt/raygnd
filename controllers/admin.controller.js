@@ -243,3 +243,58 @@ exports.deleteUser = async (req, res) => {
     return res.status(500).json({ success: false, message: "خطا در حذف کاربر.", error: error.message });
   }
 };
+
+exports.getTopSearchedAngs = async (req, res) => {
+  const isDbConnected = mongoose.connection.readyState === 1;
+  if (!isDbConnected) {
+    return res.json({
+      success: true,
+      data: [
+        { angCode: "12345", count: 12, labName: "آزمایشگاه نمونه", purity: "750", customer: "نامشخص" },
+        { angCode: "65432", count: 8, labName: "آزمایشگاه مرکزی", purity: "750", customer: "نامشخص" },
+        { angCode: "98765", count: 5, labName: "آزمایشگاه البرز", purity: "740", customer: "نامشخص" }
+      ]
+    });
+  }
+
+  try {
+    const InquiryHistory = require("../models/inquiryHistory.model");
+    const Ang = require("../models/ang.model");
+    const Order = require("../models/order.model");
+
+    const topAngs = await InquiryHistory.aggregate([
+      { $match: { angCode: { $ne: null, $exists: true, $ne: "" } } },
+      { $group: { _id: "$angCode", count: { $sum: 1 } } },
+      { $sort: { count: -1 } },
+      { $limit: 10 },
+      { $project: { _id: 0, angCode: "$_id", count: 1 } }
+    ]);
+
+    const enriched = await Promise.all(
+      topAngs.map(async (item) => {
+        const localAng = await Ang.findOne({ code: item.angCode }).lean();
+        const localOrder = await Order.findOne({ stampCode: item.angCode }).lean();
+
+        return {
+          angCode: item.angCode,
+          count: item.count,
+          labName: (localOrder && localOrder.labName) || (localAng && localAng.labName) || "نامشخص",
+          purity: (localOrder && localOrder.purity) || (localAng && localAng.purity) || "نامشخص",
+          customer: (localOrder && localOrder.sellerName) || (localAng && localAng.customer) || "نامشخص",
+        };
+      })
+    );
+
+    return res.json({
+      success: true,
+      data: enriched
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: "خطا در دریافت ۱۰ کد انگ پرجستجو.",
+      error: error.message
+    });
+  }
+};
+

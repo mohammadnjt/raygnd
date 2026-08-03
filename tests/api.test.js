@@ -220,6 +220,15 @@ describe("Gold Inquiry & Rayg API Test Suite", () => {
       expect(res.statusCode).toBe(200);
     });
 
+    it("GET /api/admin/top-searched-angs - should return top 10 searched ang codes for superAdmin", async () => {
+      const res = await request(app)
+        .get("/api/admin/top-searched-angs")
+        .set("Authorization", `Bearer ${authToken}`);
+      expect(res.statusCode).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(Array.isArray(res.body.data)).toBe(true);
+    });
+
     it("POST /api/admin/users/create - should create a new user", async () => {
       const newUserMobile = "09301112233";
       const res = await request(app)
