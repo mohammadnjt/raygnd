@@ -163,6 +163,27 @@ describe("Gold Inquiry & Rayg API Test Suite", () => {
       const res = await request(app).get("/api/general/labs").set("Authorization", `Bearer ${authToken}`);
       expect(res.statusCode).toBe(200);
     });
+
+    it("POST /api/general/orders/verify-ang - should check ang uniqueness for a lab", async () => {
+      const res = await request(app)
+        .post("/api/general/orders/verify-ang")
+        .set("Authorization", `Bearer ${authToken}`)
+        .send({ angCode: "Aa99999", labId: "507f1f77bcf86cd799439011" });
+      expect([200, 503]).toContain(res.statusCode);
+      if (res.statusCode === 200) {
+        expect(res.body.success).toBe(true);
+        expect(res.body.isDuplicate).toBe(false);
+      }
+    });
+
+    it("POST /api/general/orders/:id/seller-update - should return 404 or 503 for non-existent order / no DB", async () => {
+      const fakeId = "507f1f77bcf86cd799439011";
+      const res = await request(app)
+        .post(`/api/general/orders/${fakeId}/seller-update`)
+        .set("Authorization", `Bearer ${authToken}`)
+        .send({ wageType: "toman" });
+      expect([404, 503]).toContain(res.statusCode);
+    });
   });
 
   describe("5. Super Admin User Management & Ticket System APIs", () => {

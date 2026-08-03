@@ -4,6 +4,10 @@ const generalController = require("../controllers/general.controller");
 const { authenticate } = require("../middleware/auth.middleware");
 
 router.get("/orders", authenticate, generalController.getOrders);
+router.get("/orders/verify-ang", authenticate, generalController.verifyAng);
+router.post("/orders/verify-ang", authenticate, generalController.verifyAng);
+router.get("/verify-ang", authenticate, generalController.verifyAng);
+router.post("/verify-ang", authenticate, generalController.verifyAng);
 router.post("/orders/assign-ang", authenticate, generalController.assignAng);
 router.post("/orders/deliver", authenticate, generalController.deliverOrder);
 router.post("/orders/:id/update", authenticate, generalController.updateOrder);

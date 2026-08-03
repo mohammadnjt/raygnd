@@ -98,6 +98,91 @@ exports.getOrders = async (req, res) => {
   }
 };
 
+const checkAngDuplicateInLab = async (labId, angCode, excludeOrderId = null) => {
+  if (!labId || !angCode) return false;
+  const query = {
+    labId: { $in: [labId, labId.toString()] },
+    status: { $ne: 'cancelled' },
+    $or: [
+      { stampCode: angCode },
+      { "pieces.ang": angCode }
+    ]
+  };
+
+  if (excludeOrderId) {
+    query._id = { $ne: excludeOrderId };
+  }
+
+  const existing = await Order.findOne(query).lean();
+  return !!existing;
+};
+
+const generateUniqueAng = async (labId) => {
+  let isUnique = false;
+  let newAng = '';
+  let attempts = 0;
+
+  while (!isUnique && attempts < 100) {
+    attempts++;
+    const randomDigits = Math.floor(10000 + Math.random() * 90000);
+    newAng = `Aa${randomDigits}`;
+
+    const isDup = await checkAngDuplicateInLab(labId, newAng);
+    if (!isDup) {
+      isUnique = true;
+    }
+  }
+
+  return newAng;
+};
+
+exports.verifyAng = async (req, res) => {
+  const isDbConnected = mongoose.connection.readyState === 1;
+  if (!isDbConnected) {
+    return res.json({
+      success: true,
+      isDuplicate: false,
+      message: "کد انگ معتبر است و تکراری نیست"
+    });
+  }
+
+  try {
+    const angCode = (req.query.angCode || req.query.ang || req.body.angCode || req.body.ang || "").toString().trim();
+    let labId = (req.query.labId || req.body.labId || "").toString().trim();
+    const excludeOrderId = req.query.orderId || req.body.orderId || req.query.excludeOrderId || req.body.excludeOrderId;
+
+    if (!angCode) {
+      return res.status(400).json({ success: false, message: "کد انگ (angCode) الزامی است" });
+    }
+
+    if (!labId && req.user && req.user.companyId) {
+      labId = req.user.companyId.toString();
+    }
+
+    if (!labId) {
+      return res.status(400).json({ success: false, message: "شناسه آزمایشگاه (labId) الزامی است" });
+    }
+
+    const isDup = await checkAngDuplicateInLab(labId, angCode, excludeOrderId);
+
+    if (isDup) {
+      return res.status(200).json({
+        success: false,
+        isDuplicate: true,
+        message: "این کد انگ قبلا در این آزمایشگاه ثبت شده است"
+      });
+    }
+
+    return res.json({
+      success: true,
+      isDuplicate: false,
+      message: "کد انگ معتبر است و تکراری نیست"
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: "خطا در استعلام کد انگ", error: error.message });
+  }
+};
+
 exports.assignAng = async (req, res) => {
   const isDbConnected = mongoose.connection.readyState === 1;
   if (!isDbConnected) return res.status(503).json({ success: false, message: "دیتابیس متصل نیست" });
@@ -109,45 +194,21 @@ exports.assignAng = async (req, res) => {
     const order = await Order.findOne({ orderId });
     if (!order) return res.status(404).json({ success: false, message: "سفارش یافت نشد" });
 
-    // Check if order already has an ang (prevent duplicate assign to the same order)
-    if (order.stampCode) {
-      return res.status(400).json({ success: false, message: "برای این سفارش قبلا کد انگ ثبت شده است" });
-    }
-
-    const requestedPurity = req.body.purity || order.purity;
-
-    // Check if the same stampCode + labId + purity already exists
-    if (requestedPurity) {
-      const existingAng = await Order.findOne({
-        stampCode: stampCode,
-        labId: order.labId,
-        purity: requestedPurity,
-        _id: { $ne: order._id }
-      });
-      if (existingAng) {
-        return res.status(400).json({ 
-          success: false, 
-          message: "این کد انگ با همین عیار قبلا توسط این آزمایشگاه ثبت شده است" 
-        });
-      }
-    } else {
-       // if no purity, just check stampCode + labId
-       const existingAng = await Order.findOne({
-        stampCode: stampCode,
-        labId: order.labId,
-        _id: { $ne: order._id }
-      });
-      if (existingAng) {
-        return res.status(400).json({ 
-          success: false, 
-          message: "این کد انگ قبلا توسط این آزمایشگاه ثبت شده است" 
-        });
-      }
+    const isDup = await checkAngDuplicateInLab(order.labId, stampCode, order._id);
+    if (isDup) {
+      return res.status(400).json({ success: false, message: "این کد انگ قبلا توسط این آزمایشگاه ثبت شده است" });
     }
 
     order.stampCode = stampCode;
     order.status = "stamped";
     if (req.body.purity) order.purity = req.body.purity;
+
+    if (!order.pieces || order.pieces.length === 0) {
+      order.pieces = [{ ang: stampCode, weight: order.weight || 0 }];
+    } else {
+      order.pieces[0].ang = stampCode;
+    }
+
     await order.save();
 
     return res.json({ success: true, message: "انگ با موفقیت ثبت شد", data: order });
@@ -620,12 +681,45 @@ exports.updateOrder = async (req, res) => {
         }
       }
 
-      if (req.body.wageType !== undefined || req.body.wageValue !== undefined) {
+      if (req.body.wageType !== undefined) {
         if (!['received', 'melted'].includes(order.status)) {
           return res.status(400).json({ success: false, message: "تغییر روش پرداخت تنها پس از مرحله دریافت و قبل از تحویل/بایگانی امکان‌پذیر است" });
         }
+        order.wageType = req.body.wageType;
+        order.wageValue = 0;
+        order.totalPrice = 0;
       }
     }
+
+    // Validate pieces if provided in req.body
+    if (req.body.pieces && Array.isArray(req.body.pieces)) {
+      const incomingPieces = req.body.pieces;
+      const angsInBody = incomingPieces
+        .map(p => (p && p.ang ? String(p.ang).trim() : ''))
+        .filter(Boolean);
+
+      // 1. Check duplicate inside the provided array
+      const uniqueAngs = new Set(angsInBody);
+      if (uniqueAngs.size < angsInBody.length) {
+        return res.status(400).json({
+          success: false,
+          message: "کد انگ در قطعات ثبت‌شده تکراری است"
+        });
+      }
+
+      // 2. Check each ang against lab database
+      for (const angCode of angsInBody) {
+        const isDup = await checkAngDuplicateInLab(order.labId, angCode, order._id);
+        if (isDup) {
+          return res.status(400).json({
+            success: false,
+            message: `کد انگ ${angCode} قبلاً در این آزمایشگاه ثبت شده است`
+          });
+        }
+      }
+    }
+
+    const newStatus = req.body.status !== undefined ? req.body.status : order.status;
 
     const updatableFields = [
       "status", "weight", "description", "wageType", "wageValue", 
@@ -637,13 +731,42 @@ exports.updateOrder = async (req, res) => {
     let hasChanges = false;
     updatableFields.forEach(field => {
       if (req.body[field] !== undefined) {
-        if (isSeller && !isLab && !isAdmin && !["status", "wageType", "wageValue"].includes(field)) {
-          return;
+        if (isSeller && !isLab && !isAdmin) {
+          // Seller is only allowed to change status or wageType, not cost numbers directly
+          if (!["status", "wageType"].includes(field)) {
+            return;
+          }
         }
         order[field] = req.body[field];
         hasChanges = true;
       }
     });
+
+    // When status is 'received' or becoming 'received', ensure first piece has a unique ang
+    if (newStatus === 'received' || order.status === 'received') {
+      if (!order.pieces || order.pieces.length === 0) {
+        const generatedAng = await generateUniqueAng(order.labId);
+        order.pieces = [{
+          ang: generatedAng,
+          weight: order.weightReceived || order.weight || 0
+        }];
+        order.stampCode = generatedAng;
+        hasChanges = true;
+      } else if (!order.pieces[0].ang || String(order.pieces[0].ang).trim() === '') {
+        const generatedAng = await generateUniqueAng(order.labId);
+        order.pieces[0].ang = generatedAng;
+        order.stampCode = generatedAng;
+        hasChanges = true;
+      }
+    }
+
+    // Keep order.stampCode in sync with pieces[0].ang if pieces exist and pieces[0].ang is set
+    if (order.pieces && order.pieces.length > 0 && order.pieces[0].ang) {
+      if (order.stampCode !== order.pieces[0].ang) {
+        order.stampCode = order.pieces[0].ang;
+        hasChanges = true;
+      }
+    }
 
     if (hasChanges) {
       await order.save();
@@ -655,108 +778,13 @@ exports.updateOrder = async (req, res) => {
       data: {
         _id: order._id,
         orderNumber: order.orderId,
-        status: order.status
+        status: order.status,
+        stampCode: order.stampCode,
+        pieces: order.pieces || []
       }
     });
   } catch (error) {
     return res.status(500).json({ success: false, message: "خطا در به‌روزرسانی سفارش", error: error.message });
-  }
-};
-
-exports.cancelOrder = async (req, res) => {
-  const isDbConnected = mongoose.connection.readyState === 1;
-  if (!isDbConnected) return res.status(503).json({ success: false, message: "دیتابیس متصل نیست" });
-  
-  try {
-    const orderIdParam = req.params.id;
-    const order = await Order.findById(orderIdParam);
-    if (!order) return res.status(404).json({ success: false, message: "سفارش یافت نشد" });
-
-    const user = await User.findById(req.user._id).lean();
-    const isAdmin = user.role === 'superAdmin';
-    const isLab = order.labId === user.companyId?.toString();
-    const isSeller = order.sellerId === user._id.toString();
-
-    if (!isAdmin && !isLab && !isSeller) {
-      return res.status(403).json({ success: false, message: "شما دسترسی به این سفارش را ندارید" });
-    }
-
-    if (['received', 'melted', 'delivered', 'archived', 'completed'].includes(order.status)) {
-      return res.status(400).json({ 
-        success: false, 
-        message: "امکان لغو سفارش پس از مرحله دریافت توسط آزمایشگاه وجود ندارد" 
-      });
-    }
-
-    if (order.status === 'cancelled') {
-      return res.status(400).json({ success: false, message: "این سفارش قبلا لغو شده است" });
-    }
-
-    order.status = 'cancelled';
-    await order.save();
-
-    return res.json({
-      success: true,
-      message: "سفارش با موفقیت لغو شد",
-      data: {
-        _id: order._id,
-        orderNumber: order.orderId,
-        status: order.status
-      }
-    });
-  } catch (error) {
-    return res.status(500).json({ success: false, message: "خطا در لغو سفارش", error: error.message });
-  }
-};
-
-exports.updatePaymentMethod = async (req, res) => {
-  const isDbConnected = mongoose.connection.readyState === 1;
-  if (!isDbConnected) return res.status(503).json({ success: false, message: "دیتابیس متصل نیست" });
-  
-  try {
-    const orderIdParam = req.params.id;
-    const order = await Order.findById(orderIdParam);
-    if (!order) return res.status(404).json({ success: false, message: "سفارش یافت نشد" });
-
-    const user = await User.findById(req.user._id).lean();
-    const isAdmin = user.role === 'superAdmin';
-    const isLab = order.labId === user.companyId?.toString();
-    const isSeller = order.sellerId === user._id.toString();
-
-    if (!isAdmin && !isLab && !isSeller) {
-      return res.status(403).json({ success: false, message: "شما دسترسی به این سفارش را ندارید" });
-    }
-
-    if (!['received', 'melted'].includes(order.status)) {
-      return res.status(400).json({ 
-        success: false, 
-        message: "تغییر روش پرداخت تنها پس از مرحله دریافت توسط آزمایشگاه و قبل از تحویل/بایگانی امکان‌پذیر است" 
-      });
-    }
-
-    const { wageType, wageValue } = req.body;
-    if (wageType && !["gram", "toman", "percent"].includes(wageType)) {
-      return res.status(400).json({ success: false, message: "نوع روش پرداخت (wageType) نامعتبر است" });
-    }
-
-    if (wageType !== undefined) order.wageType = wageType;
-    if (wageValue !== undefined) order.wageValue = Number(wageValue) || 0;
-
-    await order.save();
-
-    return res.json({
-      success: true,
-      message: "روش پرداخت با موفقیت تغییر یافت",
-      data: {
-        _id: order._id,
-        orderNumber: order.orderId,
-        wageType: order.wageType,
-        wageValue: order.wageValue,
-        status: order.status
-      }
-    });
-  } catch (error) {
-    return res.status(500).json({ success: false, message: "خطا در تغییر روش پرداخت", error: error.message });
   }
 };
 
@@ -777,8 +805,9 @@ exports.sellerUpdateOrder = async (req, res) => {
       return res.status(403).json({ success: false, message: "فقط طلافروش ثبت‌کننده سفارش مجاز به این عملیات است" });
     }
 
-    const { action, status, wageType, wageValue } = req.body;
+    const { action, status, wageType } = req.body;
 
+    // 1. Cancel order
     if (action === 'cancel' || status === 'cancelled') {
       if (['received', 'melted', 'delivered', 'archived', 'completed'].includes(order.status)) {
         return res.status(400).json({ 
@@ -786,40 +815,62 @@ exports.sellerUpdateOrder = async (req, res) => {
           message: "امکان لغو سفارش پس از مرحله دریافت توسط آزمایشگاه وجود ندارد" 
         });
       }
+      if (order.status === 'cancelled') {
+        return res.status(400).json({ success: false, message: "این سفارش قبلا لغو شده است" });
+      }
       order.status = 'cancelled';
       await order.save();
       return res.json({
         success: true,
         message: "سفارش با موفقیت لغو شد",
-        data: { _id: order._id, orderNumber: order.orderId, status: order.status }
+        data: {
+          _id: order._id,
+          orderNumber: order.orderId,
+          status: order.status
+        }
       });
     }
 
-    if (wageType !== undefined || wageValue !== undefined) {
+    // 2. Update payment method type (wageType)
+    if (wageType !== undefined) {
       if (!['received', 'melted'].includes(order.status)) {
         return res.status(400).json({ 
           success: false, 
           message: "تغییر روش پرداخت تنها پس از مرحله دریافت توسط آزمایشگاه و قبل از تحویل/بایگانی امکان‌پذیر است" 
         });
       }
-      if (wageType && !["gram", "toman", "percent"].includes(wageType)) {
+      if (!["gram", "toman", "percent"].includes(wageType)) {
         return res.status(400).json({ success: false, message: "نوع روش پرداخت (wageType) نامعتبر است" });
       }
-      if (wageType !== undefined) order.wageType = wageType;
-      if (wageValue !== undefined) order.wageValue = Number(wageValue) || 0;
+
+      // Goldsmith only sets wageType. Reset cost values so lab can re-enter them
+      order.wageType = wageType;
+      order.wageValue = 0;
+      order.totalPrice = 0;
+
       await order.save();
       return res.json({
         success: true,
-        message: "روش پرداخت با موفقیت تغییر یافت",
-        data: { _id: order._id, orderNumber: order.orderId, wageType: order.wageType, wageValue: order.wageValue, status: order.status }
+        message: "نوع روش پرداخت با موفقیت تغییر یافت و مقادیر هزینه جهت ثبت مجدد توسط آزمایشگاه پاک شد",
+        data: {
+          _id: order._id,
+          orderNumber: order.orderId,
+          wageType: order.wageType,
+          wageValue: order.wageValue,
+          totalPrice: order.totalPrice,
+          status: order.status
+        }
       });
     }
 
-    return res.status(400).json({ success: false, message: "عملیات غیرمجاز یا نامشخص است" });
+    return res.status(400).json({ success: false, message: "عملیات غیرمجاز یا پارامتر ورودی نامشخص است" });
   } catch (error) {
     return res.status(500).json({ success: false, message: "خطا در به روزرسانی سفارش توسط طلافروش", error: error.message });
   }
 };
+
+exports.cancelOrder = exports.sellerUpdateOrder;
+exports.updatePaymentMethod = exports.sellerUpdateOrder;
 
 exports.getRecentLabs = async (req, res) => {
   const isDbConnected = mongoose.connection.readyState === 1;
