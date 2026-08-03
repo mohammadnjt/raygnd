@@ -210,12 +210,13 @@ exports.getOrders = async (req, res) => {
 
 const checkAngDuplicateInLab = async (labId, angCode, excludeOrderId = null) => {
   if (!labId || !angCode) return false;
+  const angStr = String(angCode).trim();
   const query = {
     labId: { $in: [labId, labId.toString()] },
     status: { $ne: 'cancelled' },
     $or: [
-      { stampCode: angCode },
-      { "pieces.ang": angCode }
+      { stampCode: angStr },
+      { "pieces.ang": angStr }
     ]
   };
 
@@ -223,8 +224,25 @@ const checkAngDuplicateInLab = async (labId, angCode, excludeOrderId = null) => 
     query._id = { $ne: excludeOrderId };
   }
 
-  const existing = await Order.findOne(query).lean();
-  return !!existing;
+  const existingOrder = await Order.findOne(query).lean();
+  if (existingOrder) return true;
+
+  try {
+    const Ang = require("../models/ang.model");
+    const Company = require("../models/company.model");
+    const lab = await Company.findById(labId).lean();
+    const labName = lab ? lab.name : "";
+
+    const existingAng = await Ang.findOne({
+      code: angStr,
+      ...(labName ? { labName } : {})
+    }).lean();
+    if (existingAng) return true;
+  } catch (err) {
+    // ignore
+  }
+
+  return false;
 };
 
 const generateUniqueAng = async (labId) => {
@@ -232,10 +250,10 @@ const generateUniqueAng = async (labId) => {
   let newAng = '';
   let attempts = 0;
 
-  while (!isUnique && attempts < 100) {
+  while (!isUnique && attempts < 200) {
     attempts++;
     const randomDigits = Math.floor(10000 + Math.random() * 90000);
-    newAng = `Aa${randomDigits}`;
+    newAng = String(randomDigits);
 
     const isDup = await checkAngDuplicateInLab(labId, newAng);
     if (!isDup) {
