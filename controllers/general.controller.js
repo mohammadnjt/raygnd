@@ -52,20 +52,61 @@ exports.getOrders = async (req, res) => {
     const limit = parseInt(req.query.limit) || 10;
     const search = String(req.query.search || "").trim();
     
-    const isAdmin = req.user?.role === "superAdmin";
+    const user = req.user;
+    const isAdmin = user?.role === "superAdmin";
     const query = {};
-    if (!isAdmin && req.user?._id) {
-      const orConditions = [{ sellerId: req.user._id.toString() }];
-      if (req.user.companyId) {
-        orConditions.push({ labId: req.user.companyId.toString() });
+
+    if (!isAdmin && user?._id) {
+      const userIdStr = user._id.toString();
+      const userMobile = user.mobile || "";
+      const userPhone = user.phone || "";
+
+      const companyIds = new Set();
+      if (user.companyId) {
+        companyIds.add(user.companyId.toString());
       }
+      try {
+        const ownedCompanies = await Company.find({ owner: user._id }).lean();
+        ownedCompanies.forEach(c => {
+          if (c && c._id) companyIds.add(c._id.toString());
+        });
+      } catch (e) {
+        // ignore
+      }
+
+      const orConditions = [
+        { sellerId: userIdStr }
+      ];
+
+      if (mongoose.Types.ObjectId.isValid(userIdStr)) {
+        orConditions.push({ sellerId: new mongoose.Types.ObjectId(userIdStr) });
+      }
+
+      if (userMobile) {
+        orConditions.push({ sellerPhone: userMobile });
+        orConditions.push({ sellerId: userMobile });
+      }
+      if (userPhone) {
+        orConditions.push({ sellerPhone: userPhone });
+      }
+
+      Array.from(companyIds).forEach(compId => {
+        orConditions.push({ labId: compId });
+        if (mongoose.Types.ObjectId.isValid(compId)) {
+          orConditions.push({ labId: new mongoose.Types.ObjectId(compId) });
+        }
+      });
+
       query.$or = orConditions;
     }
 
     if (search) {
       const searchConditions = [
         { orderId: { $regex: search, $options: "i" } },
-        { stampCode: { $regex: search, $options: "i" } }
+        { stampCode: { $regex: search, $options: "i" } },
+        { sellerName: { $regex: search, $options: "i" } },
+        { sellerPhone: { $regex: search, $options: "i" } },
+        { labName: { $regex: search, $options: "i" } }
       ];
       if (query.$or) {
         query.$and = [ { $or: query.$or }, { $or: searchConditions } ];
@@ -115,6 +156,7 @@ exports.getOrders = async (req, res) => {
     }
 
     const formattedOrders = orders.map(order => ({
+        ...order,
         _id: order._id,
         orderNumber: order.orderId,
         customerName: order.sellerName,
