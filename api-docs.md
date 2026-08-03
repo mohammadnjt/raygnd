@@ -578,6 +578,67 @@
 }
 ```
 
+### لغو سفارش توسط طلافروش (Cancel Order)
+- **آدرس:** `POST /api/general/orders/:id/cancel`
+- **نیاز به توکن:** دارد
+- **توضیحات:** طلافروش می‌تواند سفارش خود را تنها تا قبل از مرحله دریافت توسط آزمایشگاه (`received`) لغو کند.
+- **نمونه خروجی:**
+```json
+{
+  "success": true,
+  "message": "سفارش با موفقیت لغو شد",
+  "data": {
+    "_id": "6a6aa...",
+    "orderNumber": "ORD-123",
+    "status": "cancelled"
+  }
+}
+```
+
+### تغییر روش پرداخت توسط طلافروش (Update Payment Method)
+- **آدرس:** `POST /api/general/orders/:id/payment-method`
+- **نیاز به توکن:** دارد
+- **توضیحات:** پس از اینکه سفارش توسط آزمایشگاه دریافت شد (`received` یا `melted`) و تا قبل از تحویل/بایگانی (`delivered` / `archived` / `completed`)، طلافروش می‌تواند روش پرداخت را (مثلاً نقدی یا درصدی از نمونه) تغییر دهد.
+- **ورودی (JSON):**
+```json
+{
+  "wageType": "gram", // "gram" | "toman" | "percent"
+  "wageValue": 15
+}
+```
+- **نمونه خروجی:**
+```json
+{
+  "success": true,
+  "message": "روش پرداخت با موفقیت تغییر یافت",
+  "data": {
+    "_id": "6a6aa...",
+    "orderNumber": "ORD-123",
+    "wageType": "gram",
+    "wageValue": 15,
+    "status": "received"
+  }
+}
+```
+
+### به‌روزرسانی سفارش توسط طلافروش (Seller Update)
+- **آدرس:** `POST /api/general/orders/:id/seller-update`
+- **نیاز به توکن:** دارد
+- **توضیحات:** API جامع برای طلافروش که می‌تواند جهت لغو سفارش (`action: "cancel"` یا `status: "cancelled"`) قبل از دریافت یا تغییر روش پرداخت (`wageType`, `wageValue`) پس از دریافت استفاده شود.
+- **ورودی (JSON - لغو):**
+```json
+{
+  "action": "cancel"
+}
+```
+- **ورودی (JSON - تغییر روش پرداخت):**
+```json
+{
+  "wageType": "percent",
+  "wageValue": 2
+}
+```
+
 ### دریافت زیرمجموعه‌های معرفی شده (Referrals)
 - **آدرس:** `GET /api/auth/referrals`
 - **نیاز به توکن:** دارد

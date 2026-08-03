@@ -376,9 +376,16 @@ exports.getLabSettings = async (req, res) => {
     let reservedSlots = [];
 
     if (date) {
-      const orders = await Order.find({ labId, selectedDate: date }).lean();
+      const orders = await Order.find({ 
+        labId: { $in: [labId, lab._id.toString()] }, 
+        selectedDate: date,
+        status: { $ne: 'cancelled' }
+      }).lean();
       reservedSlots = orders.map(o => o.selectedTime).filter(Boolean);
     }
+
+    const normalizeTime = (t) => (typeof t === 'string' ? t.replace(/\s+/g, '') : '');
+    const normalizedReserved = reservedSlots.map(normalizeTime);
 
     const formattedWorkingHours = {};
     for (const [day, timeSlots] of Object.entries(workingHours)) {
@@ -390,8 +397,13 @@ exports.getLabSettings = async (req, res) => {
           const parts = timeStr.split("-").map(s => s.trim());
           const start = parts[0] || "";
           const end = parts[1] || "";
+          const isReserved = normalizedReserved.includes(normalizeTime(timeStr)) ||
+            normalizedReserved.some(resTime => {
+              const resParts = resTime.split("-").map(s => s.trim());
+              return resParts[0] === start && resParts[1] === end;
+            });
           return {
-            reserv: reservedSlots.includes(timeStr),
+            reserv: isReserved,
             start,
             end
           };
@@ -431,8 +443,21 @@ exports.requestOrder = async (req, res) => {
       return res.status(404).json({ success: false, message: "آزمایشگاه نامعتبر است" });
     }
 
-    const existingOrder = await Order.findOne({ labId, selectedDate, selectedTime });
-    if (existingOrder) {
+    const normalizeTime = (t) => (typeof t === 'string' ? t.replace(/\s+/g, '') : '');
+    const reqNormalizedTime = normalizeTime(selectedTime);
+
+    const existingOrders = await Order.find({ 
+      labId: { $in: [labId, lab._id.toString()] }, 
+      selectedDate,
+      status: { $ne: 'cancelled' }
+    }).lean();
+
+    const isAlreadyReserved = existingOrders.some(o => {
+      if (!o.selectedTime) return false;
+      return normalizeTime(o.selectedTime) === reqNormalizedTime;
+    });
+
+    if (isAlreadyReserved) {
       return res.status(400).json({ success: false, message: "این زمان قبلا رزرو شده است" });
     }
 
@@ -500,6 +525,24 @@ exports.updateOrder = async (req, res) => {
         return res.status(403).json({ success: false, message: "شما دسترسی ویرایش این سفارش را ندارید" });
     }
 
+    if (isSeller && !isLab && !isAdmin) {
+      if (req.body.status !== undefined) {
+        if (req.body.status === 'cancelled') {
+          if (['received', 'melted', 'delivered', 'archived', 'completed'].includes(order.status)) {
+            return res.status(400).json({ success: false, message: "امکان لغو سفارش پس از مرحله دریافت وجود ندارد" });
+          }
+        } else {
+          return res.status(403).json({ success: false, message: "طلافروش فقط مجاز به لغو سفارش می‌باشد" });
+        }
+      }
+
+      if (req.body.wageType !== undefined || req.body.wageValue !== undefined) {
+        if (!['received', 'melted'].includes(order.status)) {
+          return res.status(400).json({ success: false, message: "تغییر روش پرداخت تنها پس از مرحله دریافت و قبل از تحویل/بایگانی امکان‌پذیر است" });
+        }
+      }
+    }
+
     const updatableFields = [
       "status", "weight", "description", "wageType", "wageValue", 
       "totalPrice", "extraServices", "weightReceived", "imgReceived", 
@@ -510,6 +553,9 @@ exports.updateOrder = async (req, res) => {
     let hasChanges = false;
     updatableFields.forEach(field => {
       if (req.body[field] !== undefined) {
+        if (isSeller && !isLab && !isAdmin && !["status", "wageType", "wageValue"].includes(field)) {
+          return;
+        }
         order[field] = req.body[field];
         hasChanges = true;
       }
@@ -530,6 +576,164 @@ exports.updateOrder = async (req, res) => {
     });
   } catch (error) {
     return res.status(500).json({ success: false, message: "خطا در به‌روزرسانی سفارش", error: error.message });
+  }
+};
+
+exports.cancelOrder = async (req, res) => {
+  const isDbConnected = mongoose.connection.readyState === 1;
+  if (!isDbConnected) return res.status(503).json({ success: false, message: "دیتابیس متصل نیست" });
+  
+  try {
+    const orderIdParam = req.params.id;
+    const order = await Order.findById(orderIdParam);
+    if (!order) return res.status(404).json({ success: false, message: "سفارش یافت نشد" });
+
+    const user = await User.findById(req.user._id).lean();
+    const isAdmin = user.role === 'superAdmin';
+    const isLab = order.labId === user.companyId?.toString();
+    const isSeller = order.sellerId === user._id.toString();
+
+    if (!isAdmin && !isLab && !isSeller) {
+      return res.status(403).json({ success: false, message: "شما دسترسی به این سفارش را ندارید" });
+    }
+
+    if (['received', 'melted', 'delivered', 'archived', 'completed'].includes(order.status)) {
+      return res.status(400).json({ 
+        success: false, 
+        message: "امکان لغو سفارش پس از مرحله دریافت توسط آزمایشگاه وجود ندارد" 
+      });
+    }
+
+    if (order.status === 'cancelled') {
+      return res.status(400).json({ success: false, message: "این سفارش قبلا لغو شده است" });
+    }
+
+    order.status = 'cancelled';
+    await order.save();
+
+    return res.json({
+      success: true,
+      message: "سفارش با موفقیت لغو شد",
+      data: {
+        _id: order._id,
+        orderNumber: order.orderId,
+        status: order.status
+      }
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: "خطا در لغو سفارش", error: error.message });
+  }
+};
+
+exports.updatePaymentMethod = async (req, res) => {
+  const isDbConnected = mongoose.connection.readyState === 1;
+  if (!isDbConnected) return res.status(503).json({ success: false, message: "دیتابیس متصل نیست" });
+  
+  try {
+    const orderIdParam = req.params.id;
+    const order = await Order.findById(orderIdParam);
+    if (!order) return res.status(404).json({ success: false, message: "سفارش یافت نشد" });
+
+    const user = await User.findById(req.user._id).lean();
+    const isAdmin = user.role === 'superAdmin';
+    const isLab = order.labId === user.companyId?.toString();
+    const isSeller = order.sellerId === user._id.toString();
+
+    if (!isAdmin && !isLab && !isSeller) {
+      return res.status(403).json({ success: false, message: "شما دسترسی به این سفارش را ندارید" });
+    }
+
+    if (!['received', 'melted'].includes(order.status)) {
+      return res.status(400).json({ 
+        success: false, 
+        message: "تغییر روش پرداخت تنها پس از مرحله دریافت توسط آزمایشگاه و قبل از تحویل/بایگانی امکان‌پذیر است" 
+      });
+    }
+
+    const { wageType, wageValue } = req.body;
+    if (wageType && !["gram", "toman", "percent"].includes(wageType)) {
+      return res.status(400).json({ success: false, message: "نوع روش پرداخت (wageType) نامعتبر است" });
+    }
+
+    if (wageType !== undefined) order.wageType = wageType;
+    if (wageValue !== undefined) order.wageValue = Number(wageValue) || 0;
+
+    await order.save();
+
+    return res.json({
+      success: true,
+      message: "روش پرداخت با موفقیت تغییر یافت",
+      data: {
+        _id: order._id,
+        orderNumber: order.orderId,
+        wageType: order.wageType,
+        wageValue: order.wageValue,
+        status: order.status
+      }
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: "خطا در تغییر روش پرداخت", error: error.message });
+  }
+};
+
+exports.sellerUpdateOrder = async (req, res) => {
+  const isDbConnected = mongoose.connection.readyState === 1;
+  if (!isDbConnected) return res.status(503).json({ success: false, message: "دیتابیس متصل نیست" });
+
+  try {
+    const orderIdParam = req.params.id;
+    const order = await Order.findById(orderIdParam);
+    if (!order) return res.status(404).json({ success: false, message: "سفارش یافت نشد" });
+
+    const user = await User.findById(req.user._id).lean();
+    const isAdmin = user.role === 'superAdmin';
+    const isSeller = order.sellerId === user._id.toString();
+
+    if (!isAdmin && !isSeller) {
+      return res.status(403).json({ success: false, message: "فقط طلافروش ثبت‌کننده سفارش مجاز به این عملیات است" });
+    }
+
+    const { action, status, wageType, wageValue } = req.body;
+
+    if (action === 'cancel' || status === 'cancelled') {
+      if (['received', 'melted', 'delivered', 'archived', 'completed'].includes(order.status)) {
+        return res.status(400).json({ 
+          success: false, 
+          message: "امکان لغو سفارش پس از مرحله دریافت توسط آزمایشگاه وجود ندارد" 
+        });
+      }
+      order.status = 'cancelled';
+      await order.save();
+      return res.json({
+        success: true,
+        message: "سفارش با موفقیت لغو شد",
+        data: { _id: order._id, orderNumber: order.orderId, status: order.status }
+      });
+    }
+
+    if (wageType !== undefined || wageValue !== undefined) {
+      if (!['received', 'melted'].includes(order.status)) {
+        return res.status(400).json({ 
+          success: false, 
+          message: "تغییر روش پرداخت تنها پس از مرحله دریافت توسط آزمایشگاه و قبل از تحویل/بایگانی امکان‌پذیر است" 
+        });
+      }
+      if (wageType && !["gram", "toman", "percent"].includes(wageType)) {
+        return res.status(400).json({ success: false, message: "نوع روش پرداخت (wageType) نامعتبر است" });
+      }
+      if (wageType !== undefined) order.wageType = wageType;
+      if (wageValue !== undefined) order.wageValue = Number(wageValue) || 0;
+      await order.save();
+      return res.json({
+        success: true,
+        message: "روش پرداخت با موفقیت تغییر یافت",
+        data: { _id: order._id, orderNumber: order.orderId, wageType: order.wageType, wageValue: order.wageValue, status: order.status }
+      });
+    }
+
+    return res.status(400).json({ success: false, message: "عملیات غیرمجاز یا نامشخص است" });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: "خطا در به روزرسانی سفارش توسط طلافروش", error: error.message });
   }
 };
 
