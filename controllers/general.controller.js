@@ -742,8 +742,10 @@ exports.updateOrder = async (req, res) => {
       }
     });
 
-    // When status is 'received' or becoming 'received', ensure first piece has a unique ang
-    if (newStatus === 'received' || order.status === 'received') {
+    const isPostReceipt = ['received', 'melted', 'delivered', 'archived', 'completed'].includes(newStatus) || ['received', 'melted', 'delivered', 'archived', 'completed'].includes(order.status);
+
+    // When status is 'received' or any post-receipt stage, ensure first piece has a unique suggested ang
+    if (isPostReceipt) {
       if (!order.pieces || order.pieces.length === 0) {
         const generatedAng = await generateUniqueAng(order.labId);
         order.pieces = [{
@@ -776,6 +778,7 @@ exports.updateOrder = async (req, res) => {
       success: true,
       message: "سفارش با موفقیت به‌روزرسانی شد",
       data: {
+        ...order.toObject(),
         _id: order._id,
         orderNumber: order.orderId,
         status: order.status,

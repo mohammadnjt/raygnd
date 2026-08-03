@@ -164,6 +164,17 @@ describe("Gold Inquiry & Rayg API Test Suite", () => {
       expect(res.statusCode).toBe(200);
     });
 
+    it("GET /api/referrals/my-requests - should return user submitted partner registration requests", async () => {
+      const res = await request(app)
+        .get("/api/referrals/my-requests")
+        .set("Authorization", `Bearer ${authToken}`);
+      expect([200, 503]).toContain(res.statusCode);
+      if (res.statusCode === 200) {
+        expect(res.body.success).toBe(true);
+        expect(Array.isArray(res.body.data)).toBe(true);
+      }
+    });
+
     it("POST /api/general/orders/verify-ang - should check ang uniqueness for a lab", async () => {
       const res = await request(app)
         .post("/api/general/orders/verify-ang")

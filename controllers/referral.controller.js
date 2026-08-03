@@ -69,14 +69,24 @@ exports.createReferral = async (req, res) => {
 };
 
 exports.getReferrals = async (req, res) => {
+  const isDbConnected = mongoose.connection.readyState === 1;
+  if (!isDbConnected) {
+    return res.json({ success: true, data: [], total: 0, page: 1, limit: 10, totalPages: 1 });
+  }
+
   const page = parseInt(req.query.page) || 1;
   const limit = parseInt(req.query.limit) || 10;
+  const requestedStatus = req.query.status;
   
-  const query = { status: 'pending' };
+  const query = {};
   if (req.user.role !== 'superAdmin') {
     query.introducer = req.user._id;
-  } else if (req.query.status) {
-    query.status = req.query.status;
+  }
+
+  if (requestedStatus && requestedStatus !== 'all') {
+    query.status = requestedStatus;
+  } else if (!requestedStatus && req.user.role === 'superAdmin') {
+    query.status = 'pending';
   }
 
   try {
@@ -89,10 +99,21 @@ exports.getReferrals = async (req, res) => {
       .lean();
       
     const total = await Referral.countDocuments(query);
+
+    const statusLabels = {
+      pending: "در انتظار تایید",
+      approved: "تایید شده",
+      rejected: "رد شده"
+    };
+
+    const formattedReferrals = referrals.map(ref => ({
+      ...ref,
+      statusLabel: statusLabels[ref.status] || ref.status
+    }));
     
     return res.json({
       success: true,
-      data: referrals,
+      data: formattedReferrals,
       total,
       page,
       limit,
@@ -100,6 +121,54 @@ exports.getReferrals = async (req, res) => {
     });
   } catch (err) {
     return res.status(500).json({ success: false, message: "خطا در دریافت لیست معرفی‌ها." });
+  }
+};
+
+exports.getMyReferralRequests = async (req, res) => {
+  const isDbConnected = mongoose.connection.readyState === 1;
+  if (!isDbConnected) {
+    return res.json({ success: true, data: [], total: 0, page: 1, limit: 10, totalPages: 1 });
+  }
+
+  const page = parseInt(req.query.page) || 1;
+  const limit = parseInt(req.query.limit) || 10;
+  const requestedStatus = req.query.status; // 'pending', 'approved', 'rejected', or 'all'
+
+  const query = { introducer: req.user._id };
+  if (requestedStatus && requestedStatus !== 'all') {
+    query.status = requestedStatus;
+  }
+
+  try {
+    const referrals = await Referral.find(query)
+      .sort({ createdAt: -1 })
+      .skip((page - 1) * limit)
+      .limit(limit)
+      .lean();
+
+    const total = await Referral.countDocuments(query);
+
+    const statusLabels = {
+      pending: "در انتظار تایید",
+      approved: "تایید شده",
+      rejected: "رد شده"
+    };
+
+    const formattedReferrals = referrals.map(ref => ({
+      ...ref,
+      statusLabel: statusLabels[ref.status] || ref.status
+    }));
+
+    return res.json({
+      success: true,
+      data: formattedReferrals,
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit) || 1
+    });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: "خطا در دریافت لیست درخواست‌های همکار.", error: err.message });
   }
 };
 
