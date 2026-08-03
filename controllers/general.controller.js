@@ -7,6 +7,40 @@ const RentalRequest = require("../models/rentalRequest.model");
 const mongoose = require("mongoose");
 const moment = require("moment-jalaali");
 
+const saveAngsToCollection = async (orderDoc) => {
+  if (!orderDoc) return;
+  const Ang = require("../models/ang.model");
+  const pieces = (orderDoc.pieces && orderDoc.pieces.length > 0)
+    ? orderDoc.pieces
+    : (orderDoc.stampCode ? [{ ang: orderDoc.stampCode }] : []);
+
+  for (const piece of pieces) {
+    if (!piece || !piece.ang) continue;
+    const angCode = String(piece.ang).trim();
+    if (!angCode) continue;
+
+    try {
+      await Ang.updateOne(
+        { code: angCode, labName: orderDoc.labName || "" },
+        {
+          $setOnInsert: {
+            code: angCode,
+            customer: orderDoc.sellerName || "",
+            labName: orderDoc.labName || "",
+            labPhone: orderDoc.sellerPhone || "",
+            purity: String(orderDoc.purity || ""),
+            date: orderDoc.bookingDateLabel || moment().format("jYYYY/jMM/jDD"),
+            source: "raygir"
+          }
+        },
+        { upsert: true }
+      );
+    } catch (err) {
+      console.error("Error saving to Ang collection:", err.message);
+    }
+  }
+};
+
 exports.getOrders = async (req, res) => {
   const isDbConnected = mongoose.connection.readyState === 1;
   if (!isDbConnected) {
@@ -47,6 +81,39 @@ exports.getOrders = async (req, res) => {
       .limit(limit)
       .lean();
 
+    for (let i = 0; i < orders.length; i++) {
+      const order = orders[i];
+      const isPostReceipt = ['received', 'melted', 'delivered', 'archived', 'completed'].includes(order.status);
+      if (isPostReceipt) {
+        let orderChanged = false;
+        if (!order.pieces || order.pieces.length === 0) {
+          const generatedAng = await generateUniqueAng(order.labId);
+          order.pieces = [{
+            ang: generatedAng,
+            weight: order.weightReceived || order.weight || 0
+          }];
+          order.stampCode = generatedAng;
+          orderChanged = true;
+        } else if (!order.pieces[0].ang || String(order.pieces[0].ang).trim() === '') {
+          const generatedAng = await generateUniqueAng(order.labId);
+          order.pieces[0].ang = generatedAng;
+          order.stampCode = generatedAng;
+          orderChanged = true;
+        } else if (!order.stampCode) {
+          order.stampCode = order.pieces[0].ang;
+          orderChanged = true;
+        }
+
+        if (orderChanged) {
+          await Order.updateOne({ _id: order._id }, { pieces: order.pieces, stampCode: order.stampCode });
+        }
+
+        if (order.status === 'archived') {
+          await saveAngsToCollection(order);
+        }
+      }
+    }
+
     const formattedOrders = orders.map(order => ({
         _id: order._id,
         orderNumber: order.orderId,
@@ -54,6 +121,7 @@ exports.getOrders = async (req, res) => {
         customerPhone: order.sellerPhone,
         orderDate: order.bookingDateLabel || order.createdAt,
         status: order.status,
+        stampCode: order.stampCode,
         lab: {
           _id: order.labId,
           name: order.labName
@@ -772,6 +840,10 @@ exports.updateOrder = async (req, res) => {
 
     if (hasChanges) {
       await order.save();
+    }
+
+    if (newStatus === 'archived' || order.status === 'archived') {
+      await saveAngsToCollection(order);
     }
 
     return res.json({
