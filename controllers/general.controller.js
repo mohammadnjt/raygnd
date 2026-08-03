@@ -355,13 +355,50 @@ exports.rateCompany = async (req, res) => {
 };
 
 
+const toEnglishDigits = (str) => {
+  if (typeof str !== 'string') return '';
+  return str
+    .replace(/[۰-۹]/g, d => '۰۱۲۳۴۵۶۷۸۹'.indexOf(d))
+    .replace(/[٠-٩]/g, d => '٠١٢٣٤٥٦٧٨٩'.indexOf(d));
+};
+
+const normalizeDateStr = (dateStr) => {
+  if (!dateStr) return '';
+  let eng = toEnglishDigits(String(dateStr).trim()).replace(/-/g, '/');
+  const parts = eng.split('/');
+  if (parts.length === 3) {
+    const y = parts[0];
+    const m = parts[1].padStart(2, '0');
+    const d = parts[2].padStart(2, '0');
+    return `${y}/${m}/${d}`;
+  }
+  return eng;
+};
+
+const normalizeTimeStr = (timeStr) => {
+  if (!timeStr) return '';
+  let eng = toEnglishDigits(String(timeStr).trim()).replace(/\s+/g, '');
+  const parts = eng.split('-');
+  if (parts.length === 2) {
+    const padTime = (t) => {
+      const hp = t.split(':');
+      if (hp.length === 2) {
+        return `${hp[0].padStart(2, '0')}:${hp[1].padStart(2, '0')}`;
+      }
+      return t;
+    };
+    return `${padTime(parts[0])}-${padTime(parts[1])}`;
+  }
+  return eng;
+};
+
 exports.getLabSettings = async (req, res) => {
   const isDbConnected = mongoose.connection.readyState === 1;
   if (!isDbConnected) return res.status(503).json({ success: false, message: "دیتابیس متصل نیست" });
   
   try {
     const labId = req.params.id;
-    const { date } = req.query; // e.g. 1405/07/15
+    const dateParam = req.query.date || req.query.selectedDate;
 
     if (!mongoose.Types.ObjectId.isValid(labId)) {
       return res.status(400).json({ success: false, message: "شناسه آزمایشگاه نامعتبر است" });
@@ -373,19 +410,23 @@ exports.getLabSettings = async (req, res) => {
     }
 
     let workingHours = lab.workingHours || {};
-    let reservedSlots = [];
+    let reservedTimeSet = new Set();
 
-    if (date) {
-      const orders = await Order.find({ 
-        labId: { $in: [labId, lab._id.toString()] }, 
-        selectedDate: date,
-        status: { $ne: 'cancelled' }
-      }).lean();
-      reservedSlots = orders.map(o => o.selectedTime).filter(Boolean);
-    }
+    const normalizedTargetDate = normalizeDateStr(dateParam);
 
-    const normalizeTime = (t) => (typeof t === 'string' ? t.replace(/\s+/g, '') : '');
-    const normalizedReserved = reservedSlots.map(normalizeTime);
+    const allLabOrders = await Order.find({ 
+      labId: { $in: [labId, lab._id.toString()] },
+      status: { $ne: 'cancelled' }
+    }).lean();
+
+    allLabOrders.forEach(o => {
+      const orderDateNormalized = normalizeDateStr(o.selectedDate);
+      if (!normalizedTargetDate || orderDateNormalized === normalizedTargetDate) {
+        if (o.selectedTime) {
+          reservedTimeSet.add(normalizeTimeStr(o.selectedTime));
+        }
+      }
+    });
 
     const formattedWorkingHours = {};
     for (const [day, timeSlots] of Object.entries(workingHours)) {
@@ -397,11 +438,9 @@ exports.getLabSettings = async (req, res) => {
           const parts = timeStr.split("-").map(s => s.trim());
           const start = parts[0] || "";
           const end = parts[1] || "";
-          const isReserved = normalizedReserved.includes(normalizeTime(timeStr)) ||
-            normalizedReserved.some(resTime => {
-              const resParts = resTime.split("-").map(s => s.trim());
-              return resParts[0] === start && resParts[1] === end;
-            });
+          const normSlot = normalizeTimeStr(timeStr);
+          
+          const isReserved = reservedTimeSet.has(normSlot);
           return {
             reserv: isReserved,
             start,
