@@ -393,6 +393,30 @@ const normalizeTimeStr = (timeStr) => {
   return eng;
 };
 
+const getDayKeyFromJalaliDate = (dateStr) => {
+  if (!dateStr) return null;
+  const norm = normalizeDateStr(dateStr);
+  const parts = norm.split('/');
+  if (parts.length === 3) {
+    const jy = parseInt(parts[0], 10);
+    const jm = parseInt(parts[1], 10);
+    const jd = parseInt(parts[2], 10);
+    if (!isNaN(jy) && !isNaN(jm) && !isNaN(jd)) {
+      let m;
+      if (jy > 1300 && jy < 1500) {
+        m = moment(`${jy}/${jm}/${jd}`, 'jYYYY/jM/jD');
+      } else {
+        m = moment(`${jy}/${jm}/${jd}`, 'YYYY/M/D');
+      }
+      if (m && m.isValid()) {
+        const dayMap = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+        return dayMap[m.day()];
+      }
+    }
+  }
+  return null;
+};
+
 exports.getLabSettings = async (req, res) => {
   const isDbConnected = mongoose.connection.readyState === 1;
   if (!isDbConnected) return res.status(503).json({ success: false, message: "دیتابیس متصل نیست" });
@@ -411,46 +435,32 @@ exports.getLabSettings = async (req, res) => {
     }
 
     let workingHours = lab.workingHours || {};
-    let reservedTimeSet = new Set();
 
     const normalizedTargetDate = normalizeDateStr(dateParam);
-    let targetDayKey = null;
+    const reservedSlotsMap = new Set();
 
-    if (normalizedTargetDate) {
-      const allLabOrders = await Order.find({ 
-        labId: { $in: [labId, lab._id.toString()] },
-        status: { $ne: 'cancelled' }
-      }).lean();
+    const allLabOrders = await Order.find({ 
+      labId: { $in: [labId, lab._id.toString()] },
+      status: { $ne: 'cancelled' }
+    }).lean();
 
-      allLabOrders.forEach(o => {
-        const orderDateNormalized = normalizeDateStr(o.selectedDate);
-        if (orderDateNormalized === normalizedTargetDate) {
-          if (o.selectedTime) {
-            reservedTimeSet.add(normalizeTimeStr(o.selectedTime));
-          }
-        }
-      });
+    allLabOrders.forEach(o => {
+      if (!o.selectedDate || !o.selectedTime) return;
 
-      let m;
-      if (normalizedTargetDate.includes('/')) {
-        m = moment(normalizedTargetDate, 'jYYYY/jMM/jDD');
-        if (!m.isValid()) {
-          m = moment(normalizedTargetDate, 'YYYY/MM/DD');
-        }
-      } else if (normalizedTargetDate.includes('-')) {
-        m = moment(normalizedTargetDate, 'jYYYY-jMM-jDD');
-        if (!m.isValid()) {
-          m = moment(normalizedTargetDate, 'YYYY-MM-DD');
-        }
-      } else {
-        m = moment(normalizedTargetDate);
+      const orderDateNormalized = normalizeDateStr(o.selectedDate);
+
+      // If a target date was passed in query, skip orders from other dates
+      if (normalizedTargetDate && orderDateNormalized !== normalizedTargetDate) {
+        return;
       }
 
-      if (m && m.isValid()) {
-        const dayMap = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
-        targetDayKey = dayMap[m.day()];
+      const orderDayKey = getDayKeyFromJalaliDate(o.selectedDate);
+      const normTime = normalizeTimeStr(o.selectedTime);
+
+      if (orderDayKey && normTime) {
+        reservedSlotsMap.add(`${orderDayKey}_${normTime}`);
       }
-    }
+    });
 
     const formattedWorkingHours = {};
     for (const [day, timeSlots] of Object.entries(workingHours)) {
@@ -474,13 +484,7 @@ exports.getLabSettings = async (req, res) => {
           }
 
           const normSlot = normalizeTimeStr(timeStr);
-          let isReserved = false;
-
-          if (normalizedTargetDate && reservedTimeSet.has(normSlot)) {
-            if (!targetDayKey || day === targetDayKey) {
-              isReserved = true;
-            }
-          }
+          const isReserved = reservedSlotsMap.has(`${day}_${normSlot}`);
 
           return {
             reserv: isReserved,
