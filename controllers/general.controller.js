@@ -5,6 +5,7 @@ const Notification = require("../models/notification.model");
 const ProjectRequest = require("../models/projectRequest.model");
 const RentalRequest = require("../models/rentalRequest.model");
 const mongoose = require("mongoose");
+const moment = require("moment-jalaali");
 
 exports.getOrders = async (req, res) => {
   const isDbConnected = mongoose.connection.readyState === 1;
@@ -413,34 +414,74 @@ exports.getLabSettings = async (req, res) => {
     let reservedTimeSet = new Set();
 
     const normalizedTargetDate = normalizeDateStr(dateParam);
+    let targetDayKey = null;
 
-    const allLabOrders = await Order.find({ 
-      labId: { $in: [labId, lab._id.toString()] },
-      status: { $ne: 'cancelled' }
-    }).lean();
+    if (normalizedTargetDate) {
+      const allLabOrders = await Order.find({ 
+        labId: { $in: [labId, lab._id.toString()] },
+        status: { $ne: 'cancelled' }
+      }).lean();
 
-    allLabOrders.forEach(o => {
-      const orderDateNormalized = normalizeDateStr(o.selectedDate);
-      if (!normalizedTargetDate || orderDateNormalized === normalizedTargetDate) {
-        if (o.selectedTime) {
-          reservedTimeSet.add(normalizeTimeStr(o.selectedTime));
+      allLabOrders.forEach(o => {
+        const orderDateNormalized = normalizeDateStr(o.selectedDate);
+        if (orderDateNormalized === normalizedTargetDate) {
+          if (o.selectedTime) {
+            reservedTimeSet.add(normalizeTimeStr(o.selectedTime));
+          }
         }
+      });
+
+      let m;
+      if (normalizedTargetDate.includes('/')) {
+        m = moment(normalizedTargetDate, 'jYYYY/jMM/jDD');
+        if (!m.isValid()) {
+          m = moment(normalizedTargetDate, 'YYYY/MM/DD');
+        }
+      } else if (normalizedTargetDate.includes('-')) {
+        m = moment(normalizedTargetDate, 'jYYYY-jMM-jDD');
+        if (!m.isValid()) {
+          m = moment(normalizedTargetDate, 'YYYY-MM-DD');
+        }
+      } else {
+        m = moment(normalizedTargetDate);
       }
-    });
+
+      if (m && m.isValid()) {
+        const dayMap = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+        targetDayKey = dayMap[m.day()];
+      }
+    }
 
     const formattedWorkingHours = {};
     for (const [day, timeSlots] of Object.entries(workingHours)) {
       if (Array.isArray(timeSlots)) {
-        formattedWorkingHours[day] = timeSlots.map(timeStr => {
-          if (typeof timeStr !== 'string') {
+        formattedWorkingHours[day] = timeSlots.map(timeObj => {
+          let start = "";
+          let end = "";
+          let timeStr = "";
+
+          if (typeof timeObj === 'string') {
+            timeStr = timeObj;
+            const parts = timeStr.split("-").map(s => s.trim());
+            start = parts[0] || "";
+            end = parts[1] || "";
+          } else if (typeof timeObj === 'object' && timeObj !== null) {
+            start = timeObj.start || "";
+            end = timeObj.end || "";
+            timeStr = `${start}-${end}`;
+          } else {
             return null;
           }
-          const parts = timeStr.split("-").map(s => s.trim());
-          const start = parts[0] || "";
-          const end = parts[1] || "";
+
           const normSlot = normalizeTimeStr(timeStr);
-          
-          const isReserved = reservedTimeSet.has(normSlot);
+          let isReserved = false;
+
+          if (normalizedTargetDate && reservedTimeSet.has(normSlot)) {
+            if (!targetDayKey || day === targetDayKey) {
+              isReserved = true;
+            }
+          }
+
           return {
             reserv: isReserved,
             start,
