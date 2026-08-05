@@ -326,6 +326,9 @@ describe("Gold Inquiry & Rayg API Test Suite", () => {
       expect(res.statusCode).toBe(200);
       expect(res.body.success).toBe(true);
       expect(Array.isArray(res.body.data)).toBe(true);
+      if (res.body.data.length > 0) {
+        expect(res.body.data[0].companyId).toBeDefined();
+      }
     });
 
     it("POST /api/general/orders/verify-ang - should check ang uniqueness for a lab", async () => {

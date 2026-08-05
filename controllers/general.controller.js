@@ -1227,8 +1227,8 @@ exports.getGoldsmiths = async (req, res) => {
     return res.json({
       success: true,
       data: [
-        { _id: "650000000000000000000010", name: "طلافروشی احمدی", fname: "احمد", lname: "احمدی", mobile: "09121111111", phone: "02122222222", address: "بازار تهران، پلاک ۱۲", role: "gold" },
-        { _id: "650000000000000000000011", name: "گالری طلا و جواهر مروارید", fname: "رضا", lname: "محمدی", mobile: "09122222222", phone: "02133333333", address: "خیابان کریمخان، پلاک ۴۵", role: "gold" }
+        { _id: "650000000000000000000010", companyId: "650000000000000000000010", name: "طلافروشی احمدی", fname: "احمد", lname: "احمدی", mobile: "09121111111", phone: "02122222222", address: "بازار تهران، پلاک ۱۲", role: "gold" },
+        { _id: "650000000000000000000011", companyId: "650000000000000000000011", name: "گالری طلا و جواهر مروارید", fname: "رضا", lname: "محمدی", mobile: "09122222222", phone: "02133333333", address: "خیابان کریمخان، پلاک ۴۵", role: "gold" }
       ],
       total: 2,
       page: 1,
@@ -1264,12 +1264,23 @@ exports.getGoldsmiths = async (req, res) => {
     }
 
     const users = await User.find({ $and: userConditions }).lean();
+    const userIds = users.map(u => u._id);
+    const userCompanies = await Company.find({ owner: { $in: userIds } }).lean();
+    const companyOwnerMap = new Map();
+    userCompanies.forEach(c => {
+      if (c.owner) {
+        companyOwnerMap.set(c.owner.toString(), c._id.toString());
+      }
+    });
 
     users.forEach(u => {
       const key = u.mobile || u.phone || (u._id ? u._id.toString() : Math.random().toString());
       const fullName = `${u.fname || ''} ${u.lname || ''}`.trim() || u.mobile || u.phone || "طلافروش";
+      const userCompId = u.companyId ? u.companyId.toString() : (companyOwnerMap.get(u._id ? u._id.toString() : '') || (u._id ? u._id.toString() : key));
+      
       map.set(key, {
         _id: u._id,
+        companyId: userCompId,
         name: fullName,
         fname: u.fname || "",
         lname: u.lname || "",
@@ -1295,15 +1306,17 @@ exports.getGoldsmiths = async (req, res) => {
     }
 
     const orders = await Order.find(orderConditions.length > 0 ? { $and: orderConditions } : {})
-      .select("sellerName sellerPhone sellerId")
+      .select("sellerName sellerPhone sellerId companyId labId")
       .lean();
 
     orders.forEach(o => {
       if (o.sellerPhone || o.sellerName) {
         const key = o.sellerPhone || (o.sellerId ? o.sellerId.toString() : o.sellerName);
+        const orderCompId = o.companyId ? o.companyId.toString() : (o.sellerId ? o.sellerId.toString() : key);
         if (!map.has(key)) {
           map.set(key, {
             _id: o.sellerId || key,
+            companyId: orderCompId,
             name: o.sellerName || o.sellerPhone || "طلافروش",
             fname: o.sellerName || "",
             lname: "",
