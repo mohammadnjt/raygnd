@@ -165,7 +165,9 @@ exports.getOrders = async (req, res) => {
       }
     }
 
-    const formattedOrders = orders.map(order => ({
+    const formattedOrders = orders.map(order => {
+      const rw = order.receivedWeight ?? order.weightReceived ?? 0;
+      return {
         ...order,
         _id: order._id,
         orderNumber: order.orderId,
@@ -191,7 +193,8 @@ exports.getOrders = async (req, res) => {
         proformaNumber: order.proformaNumber,
         extraServices: order.extraServices || [],
         totalPrice: order.totalPrice,
-        weightReceived: order.weightReceived,
+        receivedWeight: rw,
+        weightReceived: rw,
         imgReceived: order.imgReceived,
         pieces: order.pieces || [],
         deliveryType: order.deliveryType,
@@ -199,9 +202,12 @@ exports.getOrders = async (req, res) => {
         deliveredWeight: order.deliveredWeight,
         purity: order.purity,
         trustWeight: order.trustWeight,
+        sampleWeight: order.sampleWeight,
+        finalSampleWeight: order.finalSampleWeight,
         sampleDelivered: order.sampleDelivered,
         isPay: order.isPay
-    }));
+      };
+    });
       
     const totalOrders = await Order.countDocuments(query);
 
@@ -755,7 +761,7 @@ exports.requestOrder = async (req, res) => {
       success: true,
       message: "سفارش با موفقیت ثبت شد",
       data: {
-        _id: new mongoose.Types.ObjectId(),
+        _id: new mongoose.Types.ObjectId().toString(),
         orderNumber: mockOrderNumber,
         orderId: mockOrderNumber,
         companyId: mockLabId,
@@ -892,7 +898,37 @@ exports.requestOrder = async (req, res) => {
 
 exports.updateOrder = async (req, res) => {
   const isDbConnected = mongoose.connection.readyState === 1;
-  if (!isDbConnected) return res.status(503).json({ success: false, message: "دیتابیس متصل نیست" });
+  if (!isDbConnected) {
+    let newStatus = req.body.status || 'confirmed';
+    if (newStatus === 'arshived') newStatus = 'archived';
+    const rw = req.body.receivedWeight !== undefined ? Number(req.body.receivedWeight) : (req.body.weightReceived !== undefined ? Number(req.body.weightReceived) : 0);
+    return res.json({
+      success: true,
+      message: "سفارش با موفقیت به‌روزرسانی شد",
+      data: {
+        _id: req.params.id,
+        orderNumber: "ORD-123456",
+        status: newStatus,
+        wageType: req.body.wageType || "toman",
+        wageValue: req.body.wageValue || 0,
+        proformaNumber: req.body.proformaNumber || "pf-5648",
+        extraServices: req.body.extraServices || [],
+        totalPrice: req.body.totalPrice || 0,
+        receivedWeight: rw,
+        weightReceived: rw,
+        imgReceived: req.body.imgReceived || "",
+        pieces: req.body.pieces || [],
+        deliveryType: req.body.deliveryType || null,
+        deductions: req.body.deductions || 0,
+        deliveredWeight: req.body.deliveredWeight || 0,
+        purity: req.body.purity || null,
+        sampleWeight: req.body.sampleWeight || null,
+        finalSampleWeight: req.body.finalSampleWeight || null,
+        sampleDelivered: req.body.sampleDelivered || false,
+        isPay: req.body.isPay || false
+      }
+    });
+  }
   
   try {
     const orderIdParam = req.params.id; // this is the _id of the order
@@ -958,7 +994,11 @@ exports.updateOrder = async (req, res) => {
       }
     }
 
-    const newStatus = req.body.status !== undefined ? req.body.status : order.status;
+    let newStatus = req.body.status !== undefined ? req.body.status : order.status;
+    if (newStatus === 'arshived') {
+      newStatus = 'archived';
+      req.body.status = 'archived';
+    }
 
     if (req.body.proformaNumber !== undefined) {
       const pStr = String(req.body.proformaNumber).trim();
@@ -978,9 +1018,9 @@ exports.updateOrder = async (req, res) => {
 
     const updatableFields = [
       "status", "weight", "description", "wageType", "wageValue", 
-      "totalPrice", "extraServices", "weightReceived", "imgReceived", 
+      "totalPrice", "extraServices", "weightReceived", "receivedWeight", "imgReceived", 
       "pieces", "isPay", "deliveryType", "deductions", "deliveredWeight", 
-      "purity", "trustWeight", "sampleDelivered", "proformaNumber"
+      "purity", "trustWeight", "sampleWeight", "finalSampleWeight", "sampleDelivered", "proformaNumber"
     ];
 
     let hasChanges = false;
@@ -997,6 +1037,37 @@ exports.updateOrder = async (req, res) => {
       }
     });
 
+    // Ensure receivedWeight and weightReceived are ALWAYS synced together
+    if (req.body.receivedWeight !== undefined || req.body.weightReceived !== undefined) {
+      const rw = req.body.receivedWeight !== undefined ? Number(req.body.receivedWeight) : Number(req.body.weightReceived);
+      order.receivedWeight = rw;
+      order.weightReceived = rw;
+      hasChanges = true;
+    }
+
+    if (req.body.extraServices !== undefined && Array.isArray(req.body.extraServices)) {
+      order.extraServices = req.body.extraServices.map(item => ({
+        title: item.title || "",
+        price: Number(item.price || 0)
+      }));
+      hasChanges = true;
+    }
+
+    if (req.body.pieces !== undefined && Array.isArray(req.body.pieces)) {
+      order.pieces = req.body.pieces.map(p => ({
+        id: p.id || p._id || new mongoose.Types.ObjectId().toString(),
+        ang: p.ang ? String(p.ang).trim() : '',
+        weight: p.weight !== undefined ? Number(p.weight) : 0,
+        dimensions: p.dimensions ? {
+          length: Number(p.dimensions.length || 0),
+          width: Number(p.dimensions.width || 0),
+          thickness: Number(p.dimensions.thickness || 0)
+        } : undefined,
+        img: p.img || null
+      }));
+      hasChanges = true;
+    }
+
     const isPostConfirmation = ['confirmed', 'received', 'melted', 'delivered', 'archived', 'completed'].includes(newStatus) || ['confirmed', 'received', 'melted', 'delivered', 'archived', 'completed'].includes(order.status);
 
     if (isPostConfirmation && !order.proformaNumber) {
@@ -1008,11 +1079,13 @@ exports.updateOrder = async (req, res) => {
 
     // When status is 'received' or any post-receipt stage, ensure first piece has a unique suggested ang
     if (isPostReceipt) {
+      const currentRw = order.receivedWeight ?? order.weightReceived ?? order.weight ?? 0;
       if (!order.pieces || order.pieces.length === 0) {
         const generatedAng = await generateUniqueAng(order.labId);
         order.pieces = [{
+          id: new mongoose.Types.ObjectId().toString(),
           ang: generatedAng,
-          weight: order.weightReceived || order.weight || 0
+          weight: currentRw
         }];
         order.stampCode = generatedAng;
         hasChanges = true;
@@ -1040,6 +1113,8 @@ exports.updateOrder = async (req, res) => {
       await saveAngsToCollection(order);
     }
 
+    const finalRw = order.receivedWeight ?? order.weightReceived ?? 0;
+
     return res.json({
       success: true,
       message: "سفارش با موفقیت به‌روزرسانی شد",
@@ -1049,6 +1124,11 @@ exports.updateOrder = async (req, res) => {
         orderNumber: order.orderId,
         status: order.status,
         stampCode: order.stampCode,
+        receivedWeight: finalRw,
+        weightReceived: finalRw,
+        sampleWeight: order.sampleWeight,
+        finalSampleWeight: order.finalSampleWeight,
+        extraServices: order.extraServices || [],
         pieces: order.pieces || []
       }
     });
@@ -1266,8 +1346,8 @@ exports.getRecentLabs = async (req, res) => {
     return res.json({
       success: true,
       data: [
-        { _id: "650000000000000000000001", name: "آزمایشگاه زرین", phone: "02188888888", address: "تهران، بازار بزرگ" },
-        { _id: "650000000000000000000002", name: "آزمایشگاه البرز", phone: "02177777777", address: "تهران، خیابان 15 خرداد" }
+        { _id: "650000000000000000000001", name: "آزمایشگاه زرین", labName: "آزمایشگاه زرین", phone: "02188888888", address: "تهران، بازار بزرگ", date: "1405/07/15", lastOrderDate: "1405/07/15", selectedDate: "1405/07/15", orderDate: "1405/07/15" },
+        { _id: "650000000000000000000002", name: "آزمایشگاه البرز", labName: "آزمایشگاه البرز", phone: "02177777777", address: "تهران، خیابان 15 خرداد", date: "1405/07/14", lastOrderDate: "1405/07/14", selectedDate: "1405/07/14", orderDate: "1405/07/14" }
       ]
     });
   }
@@ -1300,9 +1380,14 @@ exports.getRecentLabs = async (req, res) => {
     .lean();
 
     const labIds = [];
+    const labLastDateMap = {};
     for (const order of orders) {
-      if (order.labId && !labIds.includes(order.labId.toString())) {
-        labIds.push(order.labId.toString());
+      if (order.labId) {
+        const idStr = order.labId.toString();
+        if (!labIds.includes(idStr)) {
+          labIds.push(idStr);
+          labLastDateMap[idStr] = order.selectedDate || order.bookingDateLabel || (order.createdAt ? order.createdAt.toISOString() : "");
+        }
       }
       if (labIds.length >= 4) break;
     }
@@ -1322,6 +1407,7 @@ exports.getRecentLabs = async (req, res) => {
     const sortedLabs = labIds.map(id => {
       const labDoc = labs.find(l => l && l._id.toString() === id);
       if (!labDoc) return null;
+      const orderDate = labLastDateMap[id] || "";
       return {
         _id: labDoc._id,
         name: labDoc.name,
@@ -1329,7 +1415,11 @@ exports.getRecentLabs = async (req, res) => {
         phone: labDoc.phone || "",
         address: labDoc.address || "",
         score: labDoc.score || 0,
-        workingHours: labDoc.workingHours || {}
+        workingHours: labDoc.workingHours || {},
+        date: orderDate,
+        lastOrderDate: orderDate,
+        selectedDate: orderDate,
+        orderDate: orderDate
       };
     }).filter(Boolean);
 

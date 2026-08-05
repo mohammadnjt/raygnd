@@ -10,11 +10,18 @@ router.get("/verify-ang", authenticate, generalController.verifyAng);
 router.post("/verify-ang", authenticate, generalController.verifyAng);
 router.post("/orders/assign-ang", authenticate, generalController.assignAng);
 router.post("/orders/deliver", authenticate, generalController.deliverOrder);
+
+router.post("/orders/request", authenticate, generalController.requestOrder);
+router.post("/orders/create", authenticate, generalController.requestOrder);
+router.post("/orders", authenticate, generalController.requestOrder);
+
 router.post("/orders/:id/update", authenticate, generalController.updateOrder);
+router.put("/orders/:id/update", authenticate, generalController.updateOrder);
 router.post("/orders/:id/cancel", authenticate, generalController.cancelOrder);
 router.post("/orders/:id/payment-method", authenticate, generalController.updatePaymentMethod);
 router.post("/orders/:id/seller-update", authenticate, generalController.sellerUpdateOrder);
-
+router.post("/orders/:id", authenticate, generalController.updateOrder);
+router.put("/orders/:id", authenticate, generalController.updateOrder);
 router.get("/goldsmiths", authenticate, generalController.getGoldsmiths);
 router.get("/sellers", authenticate, generalController.getGoldsmiths);
 router.get("/labs/goldsmiths", authenticate, generalController.getGoldsmiths);
@@ -22,9 +29,7 @@ router.get("/labs/goldsmiths", authenticate, generalController.getGoldsmiths);
 router.get("/labs", generalController.getLabs);
 router.get("/labs/recent", authenticate, generalController.getRecentLabs);
 router.get("/labs/:id/settings", authenticate, generalController.getLabSettings);
-router.post("/orders/request", authenticate, generalController.requestOrder);
-router.post("/orders/create", authenticate, generalController.requestOrder);
-router.post("/orders", authenticate, generalController.requestOrder);
+
 router.get("/dashboard", generalController.getDashboard);
 router.get("/notifications", authenticate, generalController.getNotifications);
 

@@ -607,35 +607,50 @@
   "message": "این کد انگ قبلا در این آزمایشگاه ثبت شده است"
 }
 ```
-- **ورودی (JSON) - مقادیر اختیاری بر اساس مرحله:**
+- **ورودی (JSON) - پشتیبانی از تمامی مراحل به‌روزرسانی سفارش (Step 1 تا Step 6):**
 ```json
 {
-  "status": "confirmed", // "pending" | "cancelled" | "confirmed" | "received" | "melted" | "delivered" | "archived" | "completed"
-  "weight": 150,
-  "description": "",
-  "wageType": "gram", // "gram" | "toman" | "percent"
-  "wageValue": 15,
-  "totalPrice": 1000000,
+  // Step 1: تایید سفارش (status: confirmed)
+  "status": "confirmed", // "pending" | "confirmed" | "received" | "melted" | "delivered" | "archived" (یا "arshived") | "cancelled"
+  "wageType": "toman", // "toman" | "percent" | "gram" | "geram"
+  "wageValue": 5, // درصد یا گرم (در صورت تومانی صفر/خالی)
+  "proformaNumber": "pf-5648", // شماره پیش‌فاکتور (در صورت عدم ارسال، به صورت خودکار تولید می‌شود)
   "extraServices": [
-    { "title": "خدمات 1", "price": 50000 }
+    { "title": "پیک", "price": 25000 },
+    { "title": "خدمات اضافی", "price": 30000 }
   ],
+  "totalPrice": 2025000,
+
+  // Step 2: دریافت در آزمایشگاه (status: received)
+  "receivedWeight": 150, // وزن دریافتی (هم به صورت receivedWeight و هم weightReceived ذخیره و برگردانده می‌شود)
   "weightReceived": 150,
-  "imgReceived": "/uploads/gold/img.jpg",
+  "imgReceived": "http://example.com/received.jpg",
+
+  // Step 3: ذوب و قطعات (status: melted)
   "pieces": [
     {
-      "weight": 10,
-      "dimensions": { "length": 15, "width": 10, "thickness": 2 },
-      "img": "/uploads/gold/piece.jpg",
-      "ang": "12345"
+      "id": "piece-id-1",
+      "ang": "29005", // کد انگ اولیه به صورت خودکار در Step 2 تولید شده و یا توسط کاربر تعیین می‌شود
+      "weight": 150,
+      "dimensions": { "length": 4, "width": 5, "thickness": 2 },
+      "img": "http://example.com/piece.jpg"
     }
   ],
-  "deliveryType": "final",
-  "deductions": 15,
-  "deliveredWeight": 135,
-  "purity": 750,
-  "trustWeight": 15,
-  "sampleDelivered": true,
-  "isPay": true
+
+  // Step 4: تحویل سفارش (status: delivered)
+  "deliveryType": "final", // "final" (عیار معلوم) | "conditional" (شرطی)
+  "deductions": 2, // کسورات
+  "deliveredWeight": 150, // وزن تحویلی
+  "purity": 745, // عیار (در صورت معلوم بودن عیار)
+  "sampleWeight": 4, // وزن نمونه
+  "sampleDelivered": true, // آیا نمونه تحویل داده شده است
+  "isPay": true, // آیا دستمزد پرداخت شده است
+
+  // Step 5: در صورتی که سفارش شرطی باشد و عیار/وزن نمونه در مرحله بعد مشخص شود
+  "finalSampleWeight": 5,
+
+  // Step 6: بایگانی سفارش (status: archived یا arshived)
+  "status": "archived"
 }
 ```
 - **نمونه خروجی:**
@@ -806,4 +821,24 @@
 ### دریافت آزمایشگاه‌های اخیر (Recent Labs)
 - **آدرس:** `GET /api/general/labs/recent`
 - **نیاز به توکن:** دارد
-- **توضیحات:** حداکثر ۴ آزمایشگاهی که طلافروش اخیرا در آن‌ها نوبت گرفته و به مرحله بایگانی (`archived` یا `completed`) رسیده است را برمی‌گرداند.
+- **توضیحات:** حداکثر ۴ آزمایشگاهی که طلافروش اخیرا در آن‌ها نوبت گرفته را همراه با تاریخ آخرین نوبت برمی‌گرداند.
+- **نمونه خروجی:**
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "_id": "650000000000000000000001",
+      "name": "آزمایشگاه زرین",
+      "labName": "آزمایشگاه زرین",
+      "phone": "02188888888",
+      "address": "تهران، بازار بزرگ",
+      "score": 4.8,
+      "date": "1405/07/15",
+      "lastOrderDate": "1405/07/15",
+      "selectedDate": "1405/07/15",
+      "orderDate": "1405/07/15"
+    }
+  ]
+}
+```

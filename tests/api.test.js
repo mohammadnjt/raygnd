@@ -215,6 +215,110 @@ describe("Gold Inquiry & Rayg API Test Suite", () => {
       expect(res.body.data.manual).toBe(true);
     });
 
+    it("POST /api/general/orders/request & PUT /api/general/orders/:id - should support multi-step lifecycle updates including receivedWeight", async () => {
+      // Create order
+      const createRes = await request(app)
+        .post("/api/general/orders/request")
+        .set("Authorization", `Bearer ${authToken}`)
+        .send({
+          companyId: "507f1f77bcf86cd799439011",
+          selectedDate: "1405/07/15",
+          selectedTime: "10:00-11:30",
+          meltMethod: "traditional",
+          assayMethod: "fireAssay",
+          weight: 150,
+          sellerName: "گالری جم",
+          sellerPhone: "09121111111",
+          manual: true
+        });
+      expect(createRes.statusCode).toBe(200);
+      const orderId = createRes.body.data._id;
+
+      // Step 1: Confirm order with wage and extra services
+      const step1Res = await request(app)
+        .put(`/api/general/orders/${orderId}`)
+        .set("Authorization", `Bearer ${authToken}`)
+        .send({
+          status: 'confirmed',
+          wageType: 'toman',
+          wageValue: 5,
+          proformaNumber: 'pf-5648',
+          extraServices: [
+            { price: 25000, title: "پیک" },
+            { price: 30000, title: "خدمات اضافی" }
+          ],
+          totalPrice: 2025000
+        });
+      expect(step1Res.statusCode).toBe(200);
+      expect(step1Res.body.data.status).toBe('confirmed');
+      expect(step1Res.body.data.proformaNumber).toBe('pf-5648');
+      expect(step1Res.body.data.extraServices.length).toBe(2);
+
+      // Step 2: Set status to received and populate receivedWeight
+      const step2Res = await request(app)
+        .put(`/api/general/orders/${orderId}`)
+        .set("Authorization", `Bearer ${authToken}`)
+        .send({
+          status: 'received',
+          receivedWeight: 150,
+          imgReceived: 'http://example.com/received.jpg'
+        });
+      expect(step2Res.statusCode).toBe(200);
+      expect(step2Res.body.data.status).toBe('received');
+      expect(step2Res.body.data.receivedWeight).toBe(150);
+      expect(step2Res.body.data.weightReceived).toBe(150);
+
+      // Step 3: Melted with pieces
+      const step3Res = await request(app)
+        .put(`/api/general/orders/${orderId}`)
+        .set("Authorization", `Bearer ${authToken}`)
+        .send({
+          status: 'melted',
+          pieces: [{
+            id: 'piece-1',
+            ang: '29005',
+            weight: 150,
+            dimensions: { length: 4, width: 5, thickness: 2 },
+            img: 'http://example.com/piece.jpg'
+          }]
+        });
+      expect(step3Res.statusCode).toBe(200);
+      expect(step3Res.body.data.status).toBe('melted');
+      expect(step3Res.body.data.pieces[0].ang).toBe('29005');
+
+      // Step 4: Delivered
+      const step4Res = await request(app)
+        .put(`/api/general/orders/${orderId}`)
+        .set("Authorization", `Bearer ${authToken}`)
+        .send({
+          status: 'delivered',
+          deliveryType: 'final',
+          deductions: 2,
+          deliveredWeight: 150,
+          purity: 745,
+          sampleWeight: 4,
+          sampleDelivered: true,
+          isPay: true
+        });
+      expect(step4Res.statusCode).toBe(200);
+      expect(step4Res.body.data.status).toBe('delivered');
+      expect(step4Res.body.data.purity).toBe(745);
+      expect(step4Res.body.data.sampleWeight).toBe(4);
+
+      // Step 5 & 6: Archived / arshived
+      const step6Res = await request(app)
+        .put(`/api/general/orders/${orderId}`)
+        .set("Authorization", `Bearer ${authToken}`)
+        .send({
+          status: 'arshived',
+          finalSampleWeight: 5,
+          sampleDelivered: true
+        });
+      expect(step6Res.statusCode).toBe(200);
+      expect(step6Res.body.data.status).toBe('archived');
+      expect(step6Res.body.data.finalSampleWeight).toBe(5);
+    });
+
     it("GET /api/general/goldsmiths - should return list of goldsmiths and support search", async () => {
       const res = await request(app)
         .get("/api/general/goldsmiths?search=0912")

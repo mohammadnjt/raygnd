@@ -16,7 +16,7 @@ const OrderSchema = new mongoose.Schema(
     estimatedWeight: { type: Number, default: 0 },
     weight: { type: Number, default: 0 },
     description: { type: String, default: "" },
-    wageType: { type: String, enum: ["gram", "toman", "percent"], default: "toman" },
+    wageType: { type: String, enum: ["gram", "geram", "toman", "percent"], default: "toman" },
     wageValue: { type: Number, default: 0 },
     totalPrice: { type: Number, default: 0 },
     extraServices: [
@@ -29,6 +29,7 @@ const OrderSchema = new mongoose.Schema(
     imgReceived: { type: String, default: "" },
     pieces: [
       {
+        id: { type: String },
         weight: { type: Number },
         dimensions: {
           length: { type: Number },
@@ -44,7 +45,7 @@ const OrderSchema = new mongoose.Schema(
     manual: { type: Boolean, default: false },
     status: {
       type: String,
-      enum: ["pending", "confirmed", "received", "melted", "delivered", "archived", "cancelled", "completed"],
+      enum: ["pending", "confirmed", "received", "melted", "delivered", "archived", "arshived", "cancelled", "completed"],
       default: "pending",
     },
     hasJewel: { type: Boolean, default: false },
@@ -52,6 +53,8 @@ const OrderSchema = new mongoose.Schema(
     labFeeAmount: { type: Number, default: 0 },
     labFeeType: { type: String, default: "toman" },
     sampleDelivered: { type: Boolean, default: false },
+    sampleWeight: { type: Number, default: null },
+    finalSampleWeight: { type: Number, default: null },
     proformaNumber: { type: String, default: null },
     receivedWeight: { type: Number, default: null },
     meltedAtLabel: { type: String, default: null },
