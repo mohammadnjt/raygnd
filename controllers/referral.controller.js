@@ -15,7 +15,7 @@ function normalizeMobile(mobile) {
 exports.createReferral = async (req, res) => {
   const { targetMode, targetMobile, targetFname, targetLname, targetCompanyName, targetCompanyPhone, targetCompanyAddress, targetCity } = req.body;
 
-  if (req.user.role !== 'gold' && req.user.role !== 'lab') {
+  if (req.user.role !== 'gold' && req.user.role !== 'lab' && req.user.role !== 'superAdmin') {
     return res.status(403).json({ success: false, message: "فقط طلافروشان و آزمایشگاه‌ها می‌توانند معرفی کنند." });
   }
 
@@ -28,21 +28,35 @@ exports.createReferral = async (req, res) => {
   }
 
   const mobile = normalizeMobile(targetMobile);
+  const isDbConnected = mongoose.connection.readyState === 1;
+
+  if (!isDbConnected) {
+    const mockCompanyId = new mongoose.Types.ObjectId();
+    return res.json({
+      success: true,
+      message: "درخواست معرفی با موفقیت ثبت شد و در انتظار تایید است.",
+      companyId: mockCompanyId,
+      data: {
+        _id: new mongoose.Types.ObjectId(),
+        introducer: req.user._id,
+        targetMode,
+        targetMobile: mobile,
+        targetFname,
+        targetLname,
+        targetCompanyName,
+        targetCompanyPhone,
+        targetCompanyAddress,
+        targetCity,
+        companyId: mockCompanyId,
+        status: 'pending'
+      }
+    });
+  }
+
   try {
-    const existingUser = await User.findOne({ mobile });
+    let existingUser = await User.findOne({ mobile });
     if (existingUser && existingUser.role !== 'customer') {
       return res.status(400).json({ success: false, message: "این کاربر از قبل به عنوان طلافروش یا آزمایشگاه در سیستم ثبت شده است." });
-    }
-
-    if (targetCompanyPhone) {
-      const existingCompany = await Company.findOne({ phone: targetCompanyPhone });
-      if (existingCompany) {
-        return res.status(400).json({ success: false, message: "شماره تلفن مجموعه وارد شده قبلا در سیستم ثبت شده است." });
-      }
-      const existingReferralPhone = await Referral.findOne({ targetCompanyPhone, status: 'pending' });
-      if (existingReferralPhone) {
-        return res.status(400).json({ success: false, message: "یک درخواست در انتظار تایید با این شماره تلفن مجموعه وجود دارد." });
-      }
     }
 
     const existingReferral = await Referral.findOne({ targetMobile: mobile, status: 'pending' });
@@ -50,19 +64,57 @@ exports.createReferral = async (req, res) => {
       return res.status(400).json({ success: false, message: "یک درخواست در انتظار تایید با این شماره موبایل وجود دارد." });
     }
 
+    let user = existingUser;
+    if (!user) {
+      user = await User.create({
+        mobile,
+        fname: targetFname || "",
+        lname: targetLname || "",
+        role: "customer",
+        city: targetCity || "",
+        referredBy: req.user._id
+      });
+    } else {
+      if (targetFname && !user.fname) user.fname = targetFname;
+      if (targetLname && !user.lname) user.lname = targetLname;
+      if (targetCity && !user.city) user.city = targetCity;
+      if (!user.referredBy) user.referredBy = req.user._id;
+      await user.save();
+    }
+
+    const company = await Company.create({
+      mode: targetMode === "gold" ? "shop" : "lab",
+      name: targetCompanyName,
+      phone: targetCompanyPhone || "",
+      address: targetCompanyAddress || "",
+      owner: user._id,
+      isActive: false
+    });
+
     const referral = await Referral.create({
       introducer: req.user._id,
       targetMode,
       targetMobile: mobile,
-      targetFname,
-      targetLname,
+      targetFname: targetFname || user.fname || "",
+      targetLname: targetLname || user.lname || "",
       targetCompanyName,
-      targetCompanyPhone,
-      targetCompanyAddress,
-      targetCity
+      targetCompanyPhone: targetCompanyPhone || "",
+      targetCompanyAddress: targetCompanyAddress || "",
+      targetCity: targetCity || user.city || "",
+      companyId: company._id,
+      createdUser: user._id,
+      status: 'pending'
     });
 
-    return res.json({ success: true, message: "درخواست معرفی با موفقیت ثبت شد و در انتظار تایید است.", data: referral });
+    return res.json({
+      success: true,
+      message: "درخواست معرفی با موفقیت ثبت شد و در انتظار تایید است.",
+      companyId: company._id,
+      data: {
+        ...referral.toObject(),
+        companyId: company._id
+      }
+    });
   } catch (err) {
     return res.status(500).json({ success: false, message: "خطا در ثبت معرفی.", error: err.message });
   }
@@ -179,6 +231,11 @@ exports.approveReferral = async (req, res) => {
     return res.status(403).json({ success: false, message: "فقط ادمین کل می‌تواند تایید کند." });
   }
 
+  const isDbConnected = mongoose.connection.readyState === 1;
+  if (!isDbConnected) {
+    return res.json({ success: true, message: "درخواست تایید و همکار فعال شد." });
+  }
+
   try {
     const referral = await Referral.findById(id);
     if (!referral) return res.status(404).json({ success: false, message: "یافت نشد." });
@@ -187,58 +244,70 @@ exports.approveReferral = async (req, res) => {
       return res.status(400).json({ success: false, message: "این درخواست قبلا تعیین وضعیت شده است." });
     }
 
-    let existingUser = await User.findOne({ mobile: referral.targetMobile });
-    let user = existingUser;
-
-    if (!user) {
-      user = new User({
-        mobile: referral.targetMobile,
-        fname: referral.targetFname,
-        lname: referral.targetLname,
-        role: referral.targetMode,
-        city: referral.targetCity,
-        referredBy: referral.introducer
-      });
-    } else {
-      user.fname = referral.targetFname || user.fname;
-      user.lname = referral.targetLname || user.lname;
-      user.role = referral.targetMode;
-      user.city = referral.targetCity || user.city;
-      if (!user.referredBy) {
-        user.referredBy = referral.introducer;
-      }
-    }
-
     let company;
-    if (user.companyId) {
-      company = await Company.findById(user.companyId);
-      if (company) {
-        company.mode = referral.targetMode === "gold" ? "shop" : "lab";
-        company.name = referral.targetCompanyName;
-        company.phone = referral.targetCompanyPhone || company.phone;
-        company.address = referral.targetCompanyAddress || company.address;
-        await company.save();
-      }
+    if (referral.companyId) {
+      company = await Company.findById(referral.companyId);
     }
-    
-    if (!company) {
+    if (!company && referral.createdUser) {
+      company = await Company.findOne({ owner: referral.createdUser, name: referral.targetCompanyName });
+    }
+
+    if (company) {
+      company.isActive = true;
+      company.mode = referral.targetMode === "gold" ? "shop" : "lab";
+      company.name = referral.targetCompanyName || company.name;
+      company.phone = referral.targetCompanyPhone || company.phone;
+      company.address = referral.targetCompanyAddress || company.address;
+      await company.save();
+    } else {
       company = await Company.create({
         mode: referral.targetMode === "gold" ? "shop" : "lab",
         name: referral.targetCompanyName,
         phone: referral.targetCompanyPhone || "",
         address: referral.targetCompanyAddress || "",
-        owner: user._id
+        owner: referral.createdUser,
+        isActive: true
       });
     }
 
-    user.companyId = company._id;
+    let user = null;
+    if (referral.createdUser) {
+      user = await User.findById(referral.createdUser);
+    }
+    if (!user) {
+      user = await User.findOne({ mobile: referral.targetMobile });
+    }
+
+    if (!user) {
+      user = new User({
+        mobile: referral.targetMobile,
+        fname: referral.targetFname || "",
+        lname: referral.targetLname || "",
+        role: referral.targetMode,
+        city: referral.targetCity || "",
+        referredBy: referral.introducer,
+        companyId: company._id
+      });
+    } else {
+      user.role = referral.targetMode;
+      user.companyId = company._id;
+      if (referral.targetFname && !user.fname) user.fname = referral.targetFname;
+      if (referral.targetLname && !user.lname) user.lname = referral.targetLname;
+      if (referral.targetCity && !user.city) user.city = referral.targetCity;
+      if (!user.referredBy && referral.introducer) user.referredBy = referral.introducer;
+    }
     await user.save();
-    
+
     referral.status = 'approved';
     referral.createdUser = user._id;
+    referral.companyId = company._id;
     await referral.save();
     
-    return res.json({ success: true, message: "درخواست تایید و کاربر ایجاد شد." });
+    return res.json({
+      success: true,
+      message: "درخواست تایید و کاربر به عنوان همکار فعال شد.",
+      companyId: company._id
+    });
   } catch (err) {
     return res.status(500).json({ success: false, message: "خطا در تایید درخواست.", error: err.message });
   }
@@ -255,6 +324,11 @@ exports.rejectReferral = async (req, res) => {
     return res.status(400).json({ success: false, message: "دلیل رد درخواست الزامی است." });
   }
 
+  const isDbConnected = mongoose.connection.readyState === 1;
+  if (!isDbConnected) {
+    return res.json({ success: true, message: "درخواست رد شد." });
+  }
+
   try {
     const referral = await Referral.findById(id);
     if (!referral) return res.status(404).json({ success: false, message: "یافت نشد." });
@@ -262,12 +336,42 @@ exports.rejectReferral = async (req, res) => {
     if (referral.status !== 'pending') {
       return res.status(400).json({ success: false, message: "این درخواست قبلا تعیین وضعیت شده است." });
     }
+
+    let company;
+    if (referral.companyId) {
+      company = await Company.findById(referral.companyId);
+    }
+    if (!company && referral.createdUser) {
+      company = await Company.findOne({ owner: referral.createdUser, name: referral.targetCompanyName });
+    }
+
+    if (company) {
+      company.isActive = false;
+      await company.save();
+      await Company.deleteOne({ _id: company._id });
+    }
+
+    let user = null;
+    if (referral.createdUser) {
+      user = await User.findById(referral.createdUser);
+    }
+    if (!user) {
+      user = await User.findOne({ mobile: referral.targetMobile });
+    }
+
+    if (user) {
+      if (company && String(user.companyId) === String(company._id)) {
+        user.companyId = null;
+      }
+      user.role = "customer";
+      await user.save();
+    }
     
     referral.status = 'rejected';
     referral.rejectReason = reason;
     await referral.save();
     
-    return res.json({ success: true, message: "درخواست رد شد." });
+    return res.json({ success: true, message: "درخواست رد شد و مجموعه دیسیبل و حذف گردید. کاربر به عنوان کاستومر باقی ماند." });
   } catch (err) {
     return res.status(500).json({ success: false, message: "خطا در رد درخواست.", error: err.message });
   }

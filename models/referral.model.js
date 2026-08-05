@@ -15,6 +15,7 @@ const referralSchema = new mongoose.Schema(
     status: { type: String, enum: ['pending', 'approved', 'rejected'], default: 'pending' },
     rejectReason: { type: String, default: "" },
     
+    companyId: { type: mongoose.Schema.Types.ObjectId, ref: 'Company' },
     createdUser: { type: mongoose.Schema.Types.ObjectId, ref: 'User' }
   },
   { timestamps: true }

@@ -175,6 +175,55 @@ describe("Gold Inquiry & Rayg API Test Suite", () => {
       }
     });
 
+    it("POST /api/referrals/create - should create partner referral request and return companyId", async () => {
+      const res = await request(app)
+        .post("/api/referrals/create")
+        .set("Authorization", `Bearer ${authToken}`)
+        .send({
+          targetMode: "gold",
+          targetMobile: "09129990011",
+          targetFname: "علی",
+          targetLname: "احمدی",
+          targetCompanyName: "طلافروشی پارس",
+          targetCompanyPhone: "02144445555",
+          targetCompanyAddress: "بازار بزرگ",
+          targetCity: "تهران"
+        });
+      expect(res.statusCode).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.companyId).toBeDefined();
+    });
+
+    it("POST /api/general/orders/request - should create an order request with companyId and manual flag", async () => {
+      const res = await request(app)
+        .post("/api/general/orders/request")
+        .set("Authorization", `Bearer ${authToken}`)
+        .send({
+          companyId: "507f1f77bcf86cd799439011",
+          selectedDate: "1405/07/15",
+          selectedTime: "10:00-11:30",
+          meltMethod: "traditional",
+          assayMethod: "fireAssay",
+          weight: 12.5,
+          sellerName: "گالری جم",
+          sellerPhone: "09121111111",
+          manual: true
+        });
+      expect(res.statusCode).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.data.orderNumber).toBeDefined();
+      expect(res.body.data.manual).toBe(true);
+    });
+
+    it("GET /api/general/goldsmiths - should return list of goldsmiths and support search", async () => {
+      const res = await request(app)
+        .get("/api/general/goldsmiths?search=0912")
+        .set("Authorization", `Bearer ${authToken}`);
+      expect(res.statusCode).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(Array.isArray(res.body.data)).toBe(true);
+    });
+
     it("POST /api/general/orders/verify-ang - should check ang uniqueness for a lab", async () => {
       const res = await request(app)
         .post("/api/general/orders/verify-ang")
