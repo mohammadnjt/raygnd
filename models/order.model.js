@@ -12,7 +12,6 @@ const OrderSchema = new mongoose.Schema(
     assayMethod: { type: String, default: "fireAssay" },
     selectedDate: { type: String, default: null },
     selectedTime: { type: String, default: null },
-    source: { type: String, default: "online" },
     estimatedWeight: { type: Number, default: 0 },
     weight: { type: Number, default: 0 },
     description: { type: String, default: "" },

@@ -36,6 +36,74 @@ app.use(helmet({
 }));
 app.use(morgan('dev'));
 
+// Logger Mode Middleware (Reads package.json -> orchestrator)
+app.use((req, res, next) => {
+  let isLoggerEnabled = false;
+  try {
+    const pkgPath = path.join(__dirname, 'package.json');
+    if (fs.existsSync(pkgPath)) {
+      const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+      if (pkg && pkg.orchestrator) {
+        const orch = pkg.orchestrator;
+        isLoggerEnabled = !!(orch.logger || orch.loggerMode || orch.enableLogger || orch.debugLogger || orch.debug);
+      }
+    }
+  } catch (e) {}
+
+  if (!isLoggerEnabled && process.env.LOGGER_MODE !== 'true') {
+    return next();
+  }
+
+  const startTime = Date.now();
+  const method = req.method;
+  const url = req.originalUrl || req.url;
+
+  const originalSend = res.send;
+  const originalJson = res.json;
+
+  let responseBody;
+
+  res.json = function (body) {
+    responseBody = body;
+    return originalJson.apply(this, arguments);
+  };
+
+  res.send = function (body) {
+    if (responseBody === undefined) {
+      try {
+        responseBody = typeof body === 'string' ? JSON.parse(body) : body;
+      } catch (_) {
+        responseBody = body;
+      }
+    }
+    return originalSend.apply(this, arguments);
+  };
+
+  res.on('finish', () => {
+    const duration = Date.now() - startTime;
+    const statusCode = res.statusCode;
+
+    console.log(`\n================== [LOGGER MODE] ==================`);
+    console.log(`[API REQUEST] ${method} ${url} -> Status ${statusCode} (${duration}ms)`);
+    if (req.params && Object.keys(req.params).length > 0) {
+      console.log(`[REQ PARAMS]:`, JSON.stringify(req.params, null, 2));
+    }
+    if (req.query && Object.keys(req.query).length > 0) {
+      console.log(`[REQ QUERY]:`, JSON.stringify(req.query, null, 2));
+    }
+    if (req.body && Object.keys(req.body).length > 0) {
+      console.log(`[REQ BODY]:`, JSON.stringify(req.body, null, 2));
+    }
+    if (responseBody !== undefined) {
+      const logResp = typeof responseBody === 'object' ? JSON.stringify(responseBody, null, 2) : responseBody;
+      console.log(`[RES BODY]:`, logResp);
+    }
+    console.log(`===================================================\n`);
+  });
+
+  next();
+});
+
 mongoose.set('bufferCommands', false);
 mongoose.connect(process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/rayg', {
   useNewUrlParser: true,
