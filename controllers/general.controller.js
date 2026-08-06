@@ -751,12 +751,25 @@ exports.requestOrder = async (req, res) => {
     manual
   } = req.body;
 
-  let targetLabId = (companyId || labId || "").toString().trim();
+  const isLabRequester = req.user?.role === 'lab' || !!manual;
 
   if (!isDbConnected) {
-    const mockLabId = targetLabId || new mongoose.Types.ObjectId().toString();
+    let mockLabId, mockSellerId, mockSellerName, mockSellerPhone;
+
+    if (isLabRequester) {
+      mockLabId = req.user?.companyId?.toString() || req.user?._id?.toString() || "507f1f77bcf86cd799439011";
+      mockSellerId = sellerId || companyId || "seller-123456";
+      mockSellerName = sellerName || "طلافروشی";
+      mockSellerPhone = sellerPhone || "09121111111";
+    } else {
+      mockLabId = companyId || labId || "507f1f77bcf86cd799439011";
+      mockSellerId = sellerId || req.user?._id?.toString() || "seller-123456";
+      mockSellerName = sellerName || (req.user?.fname ? `${req.user.fname} ${req.user.lname}`.trim() : req.user?.mobile || "طلافروشی");
+      mockSellerPhone = sellerPhone || req.user?.phone || req.user?.mobile || "09121111111";
+    }
+
     const mockOrderNumber = "ORD-" + Date.now().toString().slice(-6) + Math.floor(Math.random() * 1000);
-    const isLabManual = req.user?.role === 'lab' || !!manual || !!companyId;
+
     return res.json({
       success: true,
       message: "سفارش با موفقیت ثبت شد",
@@ -770,9 +783,9 @@ exports.requestOrder = async (req, res) => {
           _id: mockLabId,
           name: "آزمایشگاه"
         },
-        sellerId: sellerId || req.user?._id?.toString() || "",
-        sellerName: sellerName || (req.user?.fname ? `${req.user.fname} ${req.user.lname}`.trim() : req.user?.mobile || ""),
-        sellerPhone: sellerPhone || req.user?.phone || req.user?.mobile || "",
+        sellerId: mockSellerId,
+        sellerName: mockSellerName,
+        sellerPhone: mockSellerPhone,
         selectedDate: selectedDate || "",
         selectedTime: selectedTime || "",
         meltMethod: meltMethod || 'traditional',
@@ -780,7 +793,7 @@ exports.requestOrder = async (req, res) => {
         description: description || '',
         weight: weight || 0,
         hasJewel: !!hasJewel,
-        manual: isLabManual,
+        manual: isLabRequester,
         status: 'pending'
       }
     });
@@ -790,105 +803,201 @@ exports.requestOrder = async (req, res) => {
     const user = await User.findById(req.user._id).lean();
     if (!user) return res.status(401).json({ success: false, message: "کاربر یافت نشد" });
 
-    if (!targetLabId && user.companyId) {
-      targetLabId = user.companyId.toString();
-    }
+    const isUserLab = user.role === 'lab' || !!manual;
 
-    if (!targetLabId) {
-      const ownedLab = await Company.findOne({ owner: user._id, mode: 'lab' }).lean();
-      if (ownedLab) {
-        targetLabId = ownedLab._id.toString();
+    let targetLabId = "";
+    let labObj = null;
+    let finalSellerId = "";
+    let finalSellerName = "";
+    let finalSellerPhone = "";
+
+    if (isUserLab) {
+      if (user.companyId) {
+        labObj = await Company.findById(user.companyId).lean();
       }
-    }
+      if (!labObj) {
+        labObj = await Company.findOne({ owner: user._id, mode: 'lab' }).lean();
+      }
 
-    if (!targetLabId) {
-      return res.status(400).json({ success: false, message: "شناسه آزمایشگاه (companyId یا labId) الزامی است" });
-    }
+      if (labObj) {
+        targetLabId = labObj._id.toString();
+      } else if (labId) {
+        targetLabId = labId.toString();
+        labObj = await Company.findById(targetLabId).lean();
+      } else if (user.companyId) {
+        targetLabId = user.companyId.toString();
+      } else {
+        targetLabId = user._id.toString();
+      }
 
-    const lab = await Company.findById(targetLabId).lean();
-    if (!lab || lab.mode !== 'lab') {
-      return res.status(404).json({ success: false, message: "آزمایشگاه نامعتبر است" });
-    }
+      const labName = labObj ? labObj.name : "آزمایشگاه";
 
-    if (selectedDate && selectedTime) {
-      const normalizeTime = (t) => (typeof t === 'string' ? t.replace(/\s+/g, '') : '');
-      const reqNormalizedTime = normalizeTime(selectedTime);
+      const goldsmithIdInput = sellerId || companyId;
+      if (goldsmithIdInput) {
+        let goldsmithComp = null;
+        let goldsmithUser = null;
 
-      const existingOrders = await Order.find({
-        labId: { $in: [targetLabId, lab._id.toString()] },
-        selectedDate,
-        status: { $ne: 'cancelled' }
-      }).lean();
+        if (mongoose.Types.ObjectId.isValid(goldsmithIdInput)) {
+          goldsmithComp = await Company.findById(goldsmithIdInput).lean();
+          if (!goldsmithComp) {
+            goldsmithUser = await User.findById(goldsmithIdInput).lean();
+          }
+        }
 
-      const isAlreadyReserved = existingOrders.some(o => {
-        if (!o.selectedTime) return false;
-        return normalizeTime(o.selectedTime) === reqNormalizedTime;
+        if (goldsmithComp) {
+          finalSellerId = goldsmithComp.owner ? goldsmithComp.owner.toString() : goldsmithComp._id.toString();
+          finalSellerName = sellerName || goldsmithComp.name;
+          finalSellerPhone = sellerPhone || goldsmithComp.phone || "";
+        } else if (goldsmithUser) {
+          finalSellerId = goldsmithUser._id.toString();
+          finalSellerName = sellerName || (goldsmithUser.fname ? `${goldsmithUser.fname} ${goldsmithUser.lname}`.trim() : goldsmithUser.mobile);
+          finalSellerPhone = sellerPhone || goldsmithUser.phone || goldsmithUser.mobile || "";
+        } else {
+          finalSellerId = goldsmithIdInput.toString();
+          finalSellerName = sellerName || "طلافروش";
+          finalSellerPhone = sellerPhone || "";
+        }
+      } else {
+        finalSellerId = sellerId || "";
+        finalSellerName = sellerName || "";
+        finalSellerPhone = sellerPhone || "";
+      }
+
+      const orderNumber = "ORD-" + Date.now().toString().slice(-6) + Math.floor(Math.random() * 1000);
+
+      const newOrder = await Order.create({
+        orderId: orderNumber,
+        sellerId: finalSellerId,
+        sellerName: finalSellerName,
+        sellerPhone: finalSellerPhone,
+        labId: targetLabId,
+        labName: labName,
+        selectedDate: selectedDate || null,
+        selectedTime: selectedTime || null,
+        meltMethod: meltMethod || 'traditional',
+        assayMethod: assayMethod || 'fireAssay',
+        description: description || '',
+        weight: weight || 0,
+        hasJewel: !!hasJewel,
+        manual: true,
+        status: 'pending',
+        bookingDateLabel: selectedDate || ''
       });
 
-      if (isAlreadyReserved) {
-        return res.status(400).json({ success: false, message: "این زمان قبلا رزرو شده است" });
+      return res.json({
+        success: true,
+        data: {
+          _id: newOrder._id,
+          orderNumber: newOrder.orderId,
+          orderId: newOrder.orderId,
+          companyId: targetLabId,
+          labId: targetLabId,
+          lab: {
+            _id: targetLabId,
+            name: labName
+          },
+          sellerId: newOrder.sellerId,
+          sellerName: newOrder.sellerName,
+          sellerPhone: newOrder.sellerPhone,
+          selectedDate: newOrder.selectedDate,
+          selectedTime: newOrder.selectedTime,
+          meltMethod: newOrder.meltMethod,
+          assayMethod: newOrder.assayMethod,
+          description: newOrder.description,
+          weight: newOrder.weight,
+          hasJewel: newOrder.hasJewel,
+          manual: true,
+          status: newOrder.status
+        }
+      });
+
+    } else {
+      targetLabId = (labId || companyId || "").toString().trim();
+      if (!targetLabId && user.companyId) {
+        targetLabId = user.companyId.toString();
       }
-    }
 
-    const orderNumber = "ORD-" + Date.now().toString().slice(-6) + Math.floor(Math.random() * 1000);
+      if (!targetLabId) {
+        return res.status(400).json({ success: false, message: "شناسه آزمایشگاه (companyId یا labId) الزامی است" });
+      }
 
-    let isManual = false;
-    if (manual !== undefined) {
-      isManual = !!manual;
-    } else if (user.role === 'lab' || (user.companyId && user.companyId.toString() === lab._id.toString()) || (lab.owner && lab.owner.toString() === user._id.toString())) {
-      isManual = true;
-    }
+      const lab = await Company.findById(targetLabId).lean();
+      if (!lab || lab.mode !== 'lab') {
+        return res.status(404).json({ success: false, message: "آزمایشگاه نامعتبر است" });
+      }
 
-    const finalSellerId = sellerId || (isManual ? "" : user._id.toString());
-    const finalSellerName = sellerName || (user.fname ? `${user.fname} ${user.lname}`.trim() : user.mobile || "");
-    const finalSellerPhone = sellerPhone || user.phone || user.mobile || "";
+      if (selectedDate && selectedTime) {
+        const normalizeTime = (t) => (typeof t === 'string' ? t.replace(/\s+/g, '') : '');
+        const reqNormalizedTime = normalizeTime(selectedTime);
 
-    const newOrder = await Order.create({
-      orderId: orderNumber,
-      sellerId: finalSellerId,
-      sellerName: finalSellerName,
-      sellerPhone: finalSellerPhone,
-      labId: lab._id.toString(),
-      labName: lab.name,
-      selectedDate: selectedDate || null,
-      selectedTime: selectedTime || null,
-      meltMethod: meltMethod || 'traditional',
-      assayMethod: assayMethod || 'fireAssay',
-      description: description || '',
-      weight: weight || 0,
-      hasJewel: !!hasJewel,
-      manual: isManual,
-      status: 'pending',
-      bookingDateLabel: selectedDate || ''
-    });
+        const existingOrders = await Order.find({
+          labId: { $in: [targetLabId, lab._id.toString()] },
+          selectedDate,
+          status: { $ne: 'cancelled' }
+        }).lean();
 
-    return res.json({
-      success: true,
-      data: {
-        _id: newOrder._id,
-        orderNumber: newOrder.orderId,
-        orderId: newOrder.orderId,
-        companyId: lab._id.toString(),
+        const isAlreadyReserved = existingOrders.some(o => {
+          if (!o.selectedTime) return false;
+          return normalizeTime(o.selectedTime) === reqNormalizedTime;
+        });
+
+        if (isAlreadyReserved) {
+          return res.status(400).json({ success: false, message: "این زمان قبلا رزرو شده است" });
+        }
+      }
+
+      const orderNumber = "ORD-" + Date.now().toString().slice(-6) + Math.floor(Math.random() * 1000);
+
+      finalSellerId = sellerId || user._id.toString();
+      finalSellerName = sellerName || (user.fname ? `${user.fname} ${user.lname}`.trim() : user.mobile || "");
+      finalSellerPhone = sellerPhone || user.phone || user.mobile || "";
+
+      const newOrder = await Order.create({
+        orderId: orderNumber,
+        sellerId: finalSellerId,
+        sellerName: finalSellerName,
+        sellerPhone: finalSellerPhone,
         labId: lab._id.toString(),
-        lab: {
-          _id: lab._id,
-          name: lab.name
-        },
-        sellerId: newOrder.sellerId,
-        sellerName: newOrder.sellerName,
-        sellerPhone: newOrder.sellerPhone,
-        selectedDate: newOrder.selectedDate,
-        selectedTime: newOrder.selectedTime,
-        meltMethod: newOrder.meltMethod,
-        assayMethod: newOrder.assayMethod,
-        description: newOrder.description,
-        weight: newOrder.weight,
-        hasJewel: newOrder.hasJewel,
-        manual: newOrder.manual,
-        status: newOrder.status
-      }
-    });
+        labName: lab.name,
+        selectedDate: selectedDate || null,
+        selectedTime: selectedTime || null,
+        meltMethod: meltMethod || 'traditional',
+        assayMethod: assayMethod || 'fireAssay',
+        description: description || '',
+        weight: weight || 0,
+        hasJewel: !!hasJewel,
+        manual: false,
+        status: 'pending',
+        bookingDateLabel: selectedDate || ''
+      });
 
+      return res.json({
+        success: true,
+        data: {
+          _id: newOrder._id,
+          orderNumber: newOrder.orderId,
+          orderId: newOrder.orderId,
+          companyId: lab._id.toString(),
+          labId: lab._id.toString(),
+          lab: {
+            _id: lab._id,
+            name: lab.name
+          },
+          sellerId: newOrder.sellerId,
+          sellerName: newOrder.sellerName,
+          sellerPhone: newOrder.sellerPhone,
+          selectedDate: newOrder.selectedDate,
+          selectedTime: newOrder.selectedTime,
+          meltMethod: newOrder.meltMethod,
+          assayMethod: newOrder.assayMethod,
+          description: newOrder.description,
+          weight: newOrder.weight,
+          hasJewel: newOrder.hasJewel,
+          manual: false,
+          status: newOrder.status
+        }
+      });
+    }
   } catch (error) {
     console.error("Request Order Error:", error);
     return res.status(500).json({ success: false, message: "خطا در ثبت نوبت", error: error.message });
@@ -1245,8 +1354,8 @@ exports.getGoldsmiths = async (req, res) => {
     const User = require("../models/user.model");
     const map = new Map();
 
-    // 1. Query Users collection
-    const userConditions = [{ role: { $ne: "superAdmin" } }];
+    // 1. Query Users collection (only gold sellers and customers, strictly excluding lab and superAdmin)
+    const userConditions = [{ role: { $nin: ["superAdmin", "lab"] } }];
 
     if (search) {
       const searchRegex = new RegExp(search, "i");
@@ -1265,7 +1374,7 @@ exports.getGoldsmiths = async (req, res) => {
 
     const users = await User.find({ $and: userConditions }).lean();
     const userIds = users.map(u => u._id);
-    const userCompanies = await Company.find({ owner: { $in: userIds } }).lean();
+    const userCompanies = await Company.find({ owner: { $in: userIds }, mode: { $ne: 'lab' } }).lean();
     const companyOwnerMap = new Map();
     userCompanies.forEach(c => {
       if (c.owner) {
@@ -1291,6 +1400,38 @@ exports.getGoldsmiths = async (req, res) => {
         city: u.city || "",
         role: u.role || "gold"
       });
+    });
+
+    // 2. Query Companies with mode 'shop' / non-lab
+    const companyConditions = [{ mode: { $ne: 'lab' } }];
+    if (search) {
+      const searchRegex = new RegExp(search, "i");
+      companyConditions.push({
+        $or: [
+          { name: searchRegex },
+          { phone: searchRegex },
+          { address: searchRegex },
+          { city: searchRegex }
+        ]
+      });
+    }
+    const shopCompanies = await Company.find({ $and: companyConditions }).lean();
+    shopCompanies.forEach(c => {
+      const key = c.phone || (c.owner ? c.owner.toString() : c._id.toString());
+      if (!map.has(key)) {
+        map.set(key, {
+          _id: c.owner ? c.owner.toString() : c._id.toString(),
+          companyId: c._id.toString(),
+          name: c.name || "طلافروشی",
+          fname: c.name || "",
+          lname: "",
+          mobile: c.phone || "",
+          phone: c.phone || "",
+          address: c.address || "",
+          city: c.city || "",
+          role: "gold"
+        });
+      }
     });
 
     // 2. Query Orders collection for sellers
