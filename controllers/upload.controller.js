@@ -70,7 +70,7 @@ exports.uploadMiddleware = (req, res, next) => {
   });
 };
 
-exports.uploadFile = (req, res) => {
+exports.uploadFile = async (req, res) => {
   if (!req.file) {
     return res.status(400).json({ success: false, message: "فایلی ارسال نشده است." });
   }
@@ -86,7 +86,33 @@ exports.uploadFile = (req, res) => {
     else if (req.file.destination.endsWith("profile")) folder = "profile";
   }
 
-  const relativePath = `/uploads/${folder}/${req.file.filename}`;
+  let finalFilename = req.file.filename;
+
+  try {
+    const ext = require('path').extname(req.file.originalname).toLowerCase();
+    const isImage = [".jpg", ".jpeg", ".png", ".gif", ".webp"].includes(ext) || (req.file.mimetype && req.file.mimetype.startsWith("image/"));
+    
+    // Don't convert SVG or if it's already webp
+    if (isImage && ext !== '.svg' && ext !== '.webp') {
+      const sharp = require('sharp');
+      const originalPath = req.file.path;
+      const webpFilename = finalFilename.replace(require('path').extname(finalFilename), '.webp');
+      const webpPath = require('path').join(req.file.destination, webpFilename);
+      
+      await sharp(originalPath)
+        .webp({ quality: 90 }) // high quality
+        .toFile(webpPath);
+        
+      // Delete original file
+      require('fs').unlinkSync(originalPath);
+      finalFilename = webpFilename;
+    }
+  } catch (err) {
+    console.error("Image conversion error:", err);
+    // If conversion fails, fallback to the originally uploaded file
+  }
+
+  const relativePath = `/uploads/${folder}/${finalFilename}`;
   const fullUrl = `${domain}${relativePath}`;
 
   return res.json({
