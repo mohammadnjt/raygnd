@@ -36,6 +36,10 @@ const upload = multer({
 });
 
 exports.uploadMiddleware = (req, res, next) => {
+  console.log(`[Upload] Upload middleware triggered for path: ${req.originalUrl}, method: ${req.method}`);
+  console.log(`[Upload] Request body:`, req.body);
+  console.log(`[Upload] Request query:`, req.query);
+  
   if (req.setTimeout) {
     req.setTimeout(300000); // 5 minutes upload timeout
   }
@@ -50,6 +54,7 @@ exports.uploadMiddleware = (req, res, next) => {
 
   uploadFields(req, res, (err) => {
     if (err) {
+      console.error(`[Upload Error] Multer error:`, err);
       if (err instanceof multer.MulterError) {
         if (err.code === "LIMIT_FILE_SIZE") {
           return res.status(400).json({ success: false, message: "حجم فایل بیش از حد مجاز است (حداکثر ۲۰ مگابایت)." });
@@ -66,12 +71,20 @@ exports.uploadMiddleware = (req, res, next) => {
       }
     }
 
+    if (req.file) {
+       console.log(`[Upload] File received by multer:`, req.file.originalname, req.file.mimetype, req.file.size);
+    } else {
+       console.log(`[Upload Warning] No file received by multer.`);
+    }
+
     next();
   });
 };
 
 exports.uploadFile = async (req, res) => {
+  console.log(`[Upload] uploadFile controller triggered`);
   if (!req.file) {
+    console.error(`[Upload Error] No file found in request`);
     return res.status(400).json({ success: false, message: "فایلی ارسال نشده است." });
   }
 
@@ -85,6 +98,8 @@ exports.uploadFile = async (req, res) => {
     if (req.file.destination.endsWith("gold")) folder = "gold";
     else if (req.file.destination.endsWith("profile")) folder = "profile";
   }
+  
+  console.log(`[Upload] Determined destination folder: ${folder}`);
 
   let finalFilename = req.file.filename;
 
@@ -94,6 +109,7 @@ exports.uploadFile = async (req, res) => {
     
     // Don't convert SVG or if it's already webp
     if (isImage && ext !== '.svg' && ext !== '.webp') {
+      console.log(`[Upload] Image identified for webp conversion: ${req.file.originalname}`);
       const sharp = require('sharp');
       const originalPath = req.file.path;
       const webpFilename = finalFilename.replace(require('path').extname(finalFilename), '.webp');
@@ -106,14 +122,19 @@ exports.uploadFile = async (req, res) => {
       // Delete original file
       require('fs').unlinkSync(originalPath);
       finalFilename = webpFilename;
+      console.log(`[Upload] Image successfully converted to: ${finalFilename}`);
+    } else {
+      console.log(`[Upload] File skipped webp conversion (ext: ${ext}, isImage: ${isImage})`);
     }
   } catch (err) {
-    console.error("Image conversion error:", err);
+    console.error(`[Upload Error] Image conversion error:`, err);
     // If conversion fails, fallback to the originally uploaded file
   }
 
   const relativePath = `/uploads/${folder}/${finalFilename}`;
   const fullUrl = `${domain}${relativePath}`;
+  
+  console.log(`[Upload Success] Final file path: ${relativePath}, Final URL: ${fullUrl}`);
 
   return res.json({
     success: true,
