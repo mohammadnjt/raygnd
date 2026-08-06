@@ -739,32 +739,48 @@ exports.requestOrder = async (req, res) => {
   const {
     labId,
     companyId,
+    customerId,
     selectedDate,
     selectedTime,
     meltMethod,
     assayMethod,
+    ayarMethod,
     description,
     weight,
     hasJewel,
     sellerName,
     sellerPhone,
     sellerId,
-    manual
+    manual,
+    status,
+    wageValue,
+    wageType,
+    extraServices,
+    finalTotalToman,
+    totalPrice
   } = req.body;
 
-  const isLabRequester = req.user?.role === 'lab' || !!manual;
+  const manualFlag = manual !== undefined ? !!manual : (req.user?.role === 'lab');
+  const isLabRequester = req.user?.role === 'lab' || manualFlag;
+  const orderStatus = status ? status : 'pending';
+  const wageVal = wageValue !== undefined ? Number(wageValue) : 0;
+  const wageTyp = wageType || "toman";
+  const extraSvcs = Array.isArray(extraServices) ? extraServices : [];
+  const totPrice = finalTotalToman !== undefined ? Number(finalTotalToman) : (totalPrice !== undefined ? Number(totalPrice) : 0);
+  const finalMeltMethod = meltMethod || 'traditional';
+  const finalAssayMethod = assayMethod || ayarMethod || 'fireAssay';
 
   if (!isDbConnected) {
     let mockLabId, mockSellerId, mockSellerName, mockSellerPhone;
 
     if (isLabRequester) {
       mockLabId = req.user?.companyId?.toString() || req.user?._id?.toString() || "507f1f77bcf86cd799439011";
-      mockSellerId = sellerId || companyId || "seller-123456";
+      mockSellerId = sellerId || customerId || companyId || "seller-123456";
       mockSellerName = sellerName || "طلافروشی";
       mockSellerPhone = sellerPhone || "09121111111";
     } else {
       mockLabId = companyId || labId || "507f1f77bcf86cd799439011";
-      mockSellerId = sellerId || req.user?._id?.toString() || "seller-123456";
+      mockSellerId = sellerId || customerId || req.user?._id?.toString() || "seller-123456";
       mockSellerName = sellerName || (req.user?.fname ? `${req.user.fname} ${req.user.lname}`.trim() : req.user?.mobile || "طلافروشی");
       mockSellerPhone = sellerPhone || req.user?.phone || req.user?.mobile || "09121111111";
     }
@@ -789,13 +805,18 @@ exports.requestOrder = async (req, res) => {
         sellerPhone: mockSellerPhone,
         selectedDate: selectedDate || "",
         selectedTime: selectedTime || "",
-        meltMethod: meltMethod || 'traditional',
-        assayMethod: assayMethod || 'fireAssay',
+        meltMethod: finalMeltMethod,
+        assayMethod: finalAssayMethod,
         description: description || '',
         weight: weight || 0,
         hasJewel: !!hasJewel,
-        manual: isLabRequester,
-        status: 'pending'
+        manual: manualFlag,
+        status: orderStatus,
+        wageValue: wageVal,
+        wageType: wageTyp,
+        extraServices: extraSvcs,
+        totalPrice: totPrice,
+        finalTotalToman: totPrice
       }
     });
   }
@@ -804,13 +825,13 @@ exports.requestOrder = async (req, res) => {
     const user = await User.findById(req.user._id).lean();
     if (!user) return res.status(401).json({ success: false, message: "کاربر یافت نشد" });
 
-    const isUserLab = user.role === 'lab' || !!manual;
+    const isUserLab = user.role === 'lab' || manualFlag;
 
     let targetLabId = "";
     let labObj = null;
     let finalSellerId = "";
-    let finalSellerName = "";
-    let finalSellerPhone = "";
+    let finalSellerName = sellerName || "";
+    let finalSellerPhone = sellerPhone || "";
 
     if (isUserLab) {
       if (user.companyId) {
@@ -833,7 +854,7 @@ exports.requestOrder = async (req, res) => {
 
       const labName = labObj ? labObj.name : "آزمایشگاه";
 
-      const goldsmithIdInput = sellerId || companyId;
+      const goldsmithIdInput = sellerId || customerId || companyId;
       if (goldsmithIdInput) {
         let goldsmithComp = null;
         let goldsmithUser = null;
@@ -847,21 +868,19 @@ exports.requestOrder = async (req, res) => {
 
         if (goldsmithComp) {
           finalSellerId = goldsmithComp.owner ? goldsmithComp.owner.toString() : goldsmithComp._id.toString();
-          finalSellerName = sellerName || goldsmithComp.name;
-          finalSellerPhone = sellerPhone || goldsmithComp.phone || "";
+          if (!finalSellerName) finalSellerName = goldsmithComp.name;
+          if (!finalSellerPhone) finalSellerPhone = goldsmithComp.phone || "";
         } else if (goldsmithUser) {
           finalSellerId = goldsmithUser._id.toString();
-          finalSellerName = sellerName || (goldsmithUser.fname ? `${goldsmithUser.fname} ${goldsmithUser.lname}`.trim() : goldsmithUser.mobile);
-          finalSellerPhone = sellerPhone || goldsmithUser.phone || goldsmithUser.mobile || "";
+          if (!finalSellerName) finalSellerName = (goldsmithUser.fname ? `${goldsmithUser.fname} ${goldsmithUser.lname}`.trim() : goldsmithUser.mobile);
+          if (!finalSellerPhone) finalSellerPhone = goldsmithUser.phone || goldsmithUser.mobile || "";
         } else {
           finalSellerId = goldsmithIdInput.toString();
-          finalSellerName = sellerName || "طلافروش";
-          finalSellerPhone = sellerPhone || "";
+          if (!finalSellerName) finalSellerName = "طلافروش";
+          if (!finalSellerPhone) finalSellerPhone = "";
         }
       } else {
-        finalSellerId = sellerId || "";
-        finalSellerName = sellerName || "";
-        finalSellerPhone = sellerPhone || "";
+        finalSellerId = sellerId || customerId || "";
       }
 
       const orderNumber = "ORD-" + Date.now().toString().slice(-6) + Math.floor(Math.random() * 1000);
@@ -875,13 +894,17 @@ exports.requestOrder = async (req, res) => {
         labName: labName,
         selectedDate: selectedDate || null,
         selectedTime: selectedTime || null,
-        meltMethod: meltMethod || 'traditional',
-        assayMethod: assayMethod || 'fireAssay',
+        meltMethod: finalMeltMethod,
+        assayMethod: finalAssayMethod,
         description: description || '',
         weight: weight || 0,
         hasJewel: !!hasJewel,
-        manual: true,
-        status: 'pending',
+        manual: manualFlag,
+        status: orderStatus,
+        wageValue: wageVal,
+        wageType: wageTyp,
+        extraServices: extraSvcs,
+        totalPrice: totPrice,
         bookingDateLabel: selectedDate || ''
       });
 
@@ -907,8 +930,13 @@ exports.requestOrder = async (req, res) => {
           description: newOrder.description,
           weight: newOrder.weight,
           hasJewel: newOrder.hasJewel,
-          manual: true,
-          status: newOrder.status
+          manual: newOrder.manual,
+          status: newOrder.status,
+          wageValue: newOrder.wageValue,
+          wageType: newOrder.wageType,
+          extraServices: newOrder.extraServices,
+          totalPrice: newOrder.totalPrice,
+          finalTotalToman: newOrder.totalPrice
         }
       });
 
@@ -949,9 +977,9 @@ exports.requestOrder = async (req, res) => {
 
       const orderNumber = "ORD-" + Date.now().toString().slice(-6) + Math.floor(Math.random() * 1000);
 
-      finalSellerId = sellerId || user._id.toString();
-      finalSellerName = sellerName || (user.fname ? `${user.fname} ${user.lname}`.trim() : user.mobile || "");
-      finalSellerPhone = sellerPhone || user.phone || user.mobile || "";
+      finalSellerId = sellerId || customerId || user._id.toString();
+      if (!finalSellerName) finalSellerName = (user.fname ? `${user.fname} ${user.lname}`.trim() : user.mobile || "");
+      if (!finalSellerPhone) finalSellerPhone = user.phone || user.mobile || "";
 
       const newOrder = await Order.create({
         orderId: orderNumber,
@@ -962,13 +990,17 @@ exports.requestOrder = async (req, res) => {
         labName: lab.name,
         selectedDate: selectedDate || null,
         selectedTime: selectedTime || null,
-        meltMethod: meltMethod || 'traditional',
-        assayMethod: assayMethod || 'fireAssay',
+        meltMethod: finalMeltMethod,
+        assayMethod: finalAssayMethod,
         description: description || '',
         weight: weight || 0,
         hasJewel: !!hasJewel,
-        manual: false,
-        status: 'pending',
+        manual: manualFlag,
+        status: orderStatus,
+        wageValue: wageVal,
+        wageType: wageTyp,
+        extraServices: extraSvcs,
+        totalPrice: totPrice,
         bookingDateLabel: selectedDate || ''
       });
 
@@ -994,8 +1026,13 @@ exports.requestOrder = async (req, res) => {
           description: newOrder.description,
           weight: newOrder.weight,
           hasJewel: newOrder.hasJewel,
-          manual: false,
-          status: newOrder.status
+          manual: newOrder.manual,
+          status: newOrder.status,
+          wageValue: newOrder.wageValue,
+          wageType: newOrder.wageType,
+          extraServices: newOrder.extraServices,
+          totalPrice: newOrder.totalPrice,
+          finalTotalToman: newOrder.totalPrice
         }
       });
     }
