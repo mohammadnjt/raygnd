@@ -22,12 +22,17 @@ const app = express();
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ extended: true }));
 app.use(cors({
-  credentials: true
+  origin: '*',
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin']
 }));
 
 app.use(helmet({
   frameguard: false,
   contentSecurityPolicy: false,
+  crossOriginResourcePolicy: { policy: "cross-origin" },
+  crossOriginEmbedderPolicy: false,
 }));
 app.use(morgan('dev'));
 
@@ -41,7 +46,18 @@ mongoose.connect(process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/rayg', {
 })
 .catch(err => console.warn('[AI Studio] Could not connect to MongoDB:', err.message));
 
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+// Serves static upload files with explicit CORP and CORS headers
+app.use('/uploads', (req, res, next) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', '*');
+  res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+  res.setHeader('Cross-Origin-Opener-Policy', 'unsafe-none');
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(200);
+  }
+  next();
+}, express.static(path.join(__dirname, 'uploads')));
 
 // Cleanup tmp uploads older than 1 day
 setInterval(() => {
@@ -112,9 +128,12 @@ const PORT = process.env.PORT || 3000;
 const HOST = '0.0.0.0';
 
 if (require.main === module) {
-  app.listen(PORT, HOST, () => {
+  const server = app.listen(PORT, HOST, () => {
     console.log(`HTTP Server running on http://${HOST}:${PORT}`);
   });
+  server.keepAliveTimeout = 65000;
+  server.headersTimeout = 66000;
+  server.requestTimeout = 300000; // 5 minutes timeout for uploads
 }
 
 module.exports = app;
