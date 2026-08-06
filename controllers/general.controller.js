@@ -442,6 +442,7 @@ exports.getLabs = async (req, res) => {
           labName: lab.name,
           labPhone: lab.phone,
           labAddress: lab.address,
+          labCity: (lab.owner && lab.owner.city) ? lab.owner.city : (lab.city || ""),
           labScore: lab.score,
           ownerId: lab.owner ? lab.owner._id : null,
           avatar: avatarUrl
