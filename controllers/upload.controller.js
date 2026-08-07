@@ -90,15 +90,38 @@ exports.uploadFile = async (req, res) => {
 
   const domain = process.env.DOMAIN_URL || "https://raygnd.blhgroups.ir";
   let folder = "tmp";
-  const type = req.query.type || req.body.type;
-  if (type === "gold") folder = "gold";
-  else if (type === "profile" || type === "avatar") folder = "profile";
-
   if (req.file.destination) {
-    if (req.file.destination.endsWith("gold")) folder = "gold";
-    else if (req.file.destination.endsWith("profile")) folder = "profile";
+    const parts = req.file.destination.replace(/\\/g, '/').split('/');
+    folder = parts[parts.length - 1]; // "tmp", "gold", "profile"
   }
-  
+
+  // Move the file if req.body.type resolves to a different target folder now
+  const type = req.query.type || req.body.type;
+  let targetFolder = folder;
+  if (type === "gold") targetFolder = "gold";
+  else if (type === "profile" || type === "avatar") targetFolder = "profile";
+
+  if (targetFolder !== folder) {
+    try {
+      const fs = require('fs');
+      const path = require('path');
+      const oldPath = req.file.path;
+      const newDest = path.join(__dirname, "../uploads/", targetFolder);
+      if (!fs.existsSync(newDest)) {
+         fs.mkdirSync(newDest, { recursive: true });
+      }
+      const newPath = path.join(newDest, req.file.filename);
+      fs.renameSync(oldPath, newPath);
+      
+      req.file.destination = newDest;
+      req.file.path = newPath;
+      folder = targetFolder;
+      console.log(`[Upload] Moved file from tmp to target folder: ${targetFolder}`);
+    } catch(err) {
+      console.error(`[Upload Error] Could not move file to ${targetFolder}:`, err);
+    }
+  }
+
   console.log(`[Upload] Determined destination folder: ${folder}`);
 
   let finalFilename = req.file.filename;
@@ -112,7 +135,9 @@ exports.uploadFile = async (req, res) => {
       console.log(`[Upload] Image identified for webp conversion: ${req.file.originalname}`);
       const sharp = require('sharp');
       const originalPath = req.file.path;
-      const webpFilename = finalFilename.replace(require('path').extname(finalFilename), '.webp');
+      
+      const extStr = require('path').extname(finalFilename);
+      const webpFilename = extStr ? finalFilename.replace(extStr, '.webp') : finalFilename + '.webp';
       const webpPath = require('path').join(req.file.destination, webpFilename);
       
       await sharp(originalPath)

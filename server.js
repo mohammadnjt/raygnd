@@ -58,6 +58,8 @@ app.use((req, res, next) => {
   const method = req.method;
   const url = req.originalUrl || req.url;
 
+  console.log(`\n---> [API RECEIVED] ${method} ${url}`);
+
   const originalSend = res.send;
   const originalJson = res.json;
 
@@ -83,7 +85,7 @@ app.use((req, res, next) => {
     const duration = Date.now() - startTime;
     const statusCode = res.statusCode;
 
-    console.log(`\n================== [LOGGER MODE] ==================`);
+    console.log(`\n================== [LOGGER MODE (FINISH)] ==================`);
     console.log(`[API REQUEST] ${method} ${url} -> Status ${statusCode} (${duration}ms)`);
     if (req.params && Object.keys(req.params).length > 0) {
       console.log(`[REQ PARAMS]:`, JSON.stringify(req.params, null, 2));
@@ -99,6 +101,15 @@ app.use((req, res, next) => {
       console.log(`[RES BODY]:`, logResp);
     }
     console.log(`===================================================\n`);
+  });
+
+  res.on('close', () => {
+    if (!res.writableFinished) {
+      const duration = Date.now() - startTime;
+      console.log(`\n================== [LOGGER MODE (CLIENT CLOSED)] ==================`);
+      console.log(`[API REQUEST] ${method} ${url} -> Client Closed Connection (${duration}ms)`);
+      console.log(`===================================================\n`);
+    }
   });
 
   next();
