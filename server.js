@@ -173,12 +173,13 @@ app.use('/api/referrals', referralRoutes);
 app.get('/api/version', (req, res) => {
   res.json({ 
     success: true, 
-    version: "1.0.0",
+    version: "1.0.4",
     aboutUs: {
       title: "درباره ما",
       description: "ما یک پلتفرم جامع برای ارتباط طلا فروشان و آزمایشگاه‌های عیارسنجی طلا هستیم و تلاش می‌کنیم بهترین خدمات را به شما ارائه دهیم.",
-      contactEmail: "info@example.com",
-      contactPhone: "021-12345678"
+      contactEmail: "ourstalaee@gmail.com",
+      address: "خرسان شمالی - بجنورد - طالقانی 27 (رو به روی کوچه گرمه ای) - معاونت توسعه تحقیقات و فناوری اورس طلایی",
+      contactPhone: "058-44443355"
     },
     banners: [
       "https://example.com/banner1.jpg",
